@@ -12,3 +12,5 @@ data/*.sqlite
 data/*.sqlite3
 frontend-backup-*/
 *.log
+
+policy_engine_copy.txt
