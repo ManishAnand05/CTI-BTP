@@ -1,0 +1,207 @@
+
+.cti-form-panel {
+  width: 100%;
+  padding: 26px;
+  margin-bottom: 24px;
+  background: #ffffff;
+  border: 1px solid #e8e7f1;
+  border-radius: 16px;
+  box-shadow: 0 5px 20px rgba(37, 35, 69, 0.035);
+}
+
+.cti-form-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.cti-form-heading-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  flex-shrink: 0;
+  color: #7062e8;
+  background: #f0edff;
+  border-radius: 12px;
+}
+
+.cti-form-heading h3 {
+  margin: 0 0 6px;
+  color: #252345;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.cti-form-heading p {
+  margin: 0;
+  color: #77758e;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cti-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.cti-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  color: #403d61;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cti-field-wide {
+  grid-column: 1 / -1;
+}
+
+.cti-field input,
+.cti-field select,
+.cti-field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 12px 13px;
+  color: #252345;
+  background: #ffffff;
+  border: 1px solid #dedcea;
+  border-radius: 9px;
+  outline: none;
+  font-size: 13px;
+  font-weight: 400;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.cti-field input,
+.cti-field select {
+  min-height: 43px;
+}
+
+.cti-field textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.cti-field input::placeholder,
+.cti-field textarea::placeholder {
+  color: #aaa7bd;
+}
+
+.cti-field input:focus,
+.cti-field select:focus,
+.cti-field textarea:focus {
+  border-color: #7062e8;
+  box-shadow: 0 0 0 3px rgba(112, 98, 232, 0.12);
+}
+
+.cti-field input:disabled {
+  cursor: not-allowed;
+  background: #f4f3f8;
+}
+
+.cti-form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-top: 22px;
+  margin-top: 22px;
+  border-top: 1px solid #eeedf5;
+}
+
+.cti-form-footer p {
+  margin: 0;
+  color: #85829c;
+  font-size: 12px;
+}
+
+.cti-submit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0 18px;
+  color: #ffffff;
+  background: linear-gradient(135deg, #7062e8, #5284f5);
+  border: 0;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 5px 12px rgba(112, 98, 232, 0.18);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.cti-submit-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(112, 98, 232, 0.25);
+}
+
+.cti-submit-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.cti-form-message {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.cti-form-error {
+  color: #b4233c;
+  background: #fff1f3;
+  border-color: #ffd4dc;
+}
+
+.cti-form-success {
+  color: #137653;
+  background: #ecfaf3;
+  border-color: #c8efdc;
+}
+
+.cti-spinner {
+  animation: cti-spin 1s linear infinite;
+}
+
+@keyframes cti-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .cti-form-panel {
+    padding: 18px;
+  }
+
+  .cti-form-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .cti-field-wide {
+    grid-column: auto;
+  }
+
+  .cti-form-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cti-submit-button {
+    width: 100%;
+  }
+}
