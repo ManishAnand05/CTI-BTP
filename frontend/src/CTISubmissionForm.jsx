@@ -1,4 +1,3 @@
-
 import { useState } from 'react'
 import {
   FilePlus2,
@@ -20,6 +19,7 @@ const initialForm = {
   sharing_sector: 'Finance',
   source_type: 'threat_research',
   source_reliability: 'verified',
+  observed_at: '',
   description: '',
 }
 
@@ -58,6 +58,24 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
       return
     }
 
+    let observedAt = null
+
+    if (form.observed_at) {
+      const observationDate = new Date(form.observed_at)
+
+      if (Number.isNaN(observationDate.getTime())) {
+        setError('Enter a valid observation date and time.')
+        return
+      }
+
+      if (observationDate.getTime() > Date.now()) {
+        setError('Observation date and time cannot be in the future.')
+        return
+      }
+
+      observedAt = observationDate.toISOString()
+    }
+
     const payload = {
       ...form,
       organization_id: ORGANIZATION_ID,
@@ -67,6 +85,7 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
           ? ''
           : form.indicator_value.trim(),
       description: form.description.trim(),
+      observed_at: observedAt,
     }
 
     try {
@@ -248,6 +267,20 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
               <option value="partial">Partial</option>
               <option value="verified">Verified</option>
             </select>
+          </label>
+
+          <label className="cti-field">
+            Observation date and time
+            <input
+              type="datetime-local"
+              name="observed_at"
+              value={form.observed_at}
+              onChange={updateField}
+            />
+            <small>
+              When was the threat evidence actually observed? Leave empty
+              if unknown.
+            </small>
           </label>
 
           <label className="cti-field cti-field-wide">

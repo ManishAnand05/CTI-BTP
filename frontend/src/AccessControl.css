@@ -1,0 +1,217 @@
+.ac-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ac-header h2 {
+  margin: 0 0 8px 0;
+  color: #292454;
+  font-size: 24px;
+}
+
+.ac-header p {
+  margin: 0;
+  color: #77758e;
+  font-size: 13px;
+}
+
+.ac-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.ac-card {
+  background: #fff;
+  border: 1px solid #e8e6f1;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 3px 12px rgba(37, 35, 69, 0.04);
+}
+
+.ac-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  color: #7062e8;
+}
+
+.ac-panel-heading h3 {
+  margin: 0;
+  color: #292454;
+  font-size: 16px;
+}
+
+.ac-sub {
+  color: #77758e;
+  font-size: 12px;
+  margin-top: -10px;
+  margin-bottom: 20px;
+}
+
+/* FORM */
+.ac-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ac-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #45435f;
+}
+
+.ac-form select {
+  padding: 12px;
+  border: 1px solid #e8e6f1;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #292454;
+  outline: none;
+}
+
+.ac-form select:focus {
+  border-color: #7062e8;
+}
+
+.ac-btn {
+  margin-top: 8px;
+  padding: 12px;
+  background: #7062e8;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+.ac-btn:hover:not(:disabled) {
+  background: #5a4bdf;
+}
+
+.ac-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* DECISION RESULT */
+.ac-decision {
+  margin-top: 24px;
+  padding: 24px;
+  border-radius: 12px;
+  animation: slideDown 0.3s ease-out;
+}
+
+.ac-decision.granted {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+
+.ac-decision.denied {
+  background: #fff0f3;
+  border: 1px solid #fecdd3;
+}
+
+.ac-decision-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.ac-decision.granted .ac-decision-header { color: #168568; }
+.ac-decision.denied .ac-decision-header { color: #c73754; }
+
+.ac-decision-header h3 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 1px;
+}
+
+.ac-reason {
+  margin: 0 0 16px 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #292454;
+}
+
+.ac-details h4 {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #77758e;
+}
+
+.ac-details ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: #45435f;
+}
+
+/* AUDIT TRAIL */
+.ac-audit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.ac-audit-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #fbfbfe;
+  border: 1px solid #e8e6f1;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.ac-audit-time {
+  color: #77758e;
+  font-family: monospace;
+}
+
+.ac-audit-content {
+  flex: 1;
+  color: #45435f;
+}
+
+.ac-audit-status {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ac-audit-status.granted { background: #dcfce7; color: #168568; }
+.ac-audit-status.denied { background: #ffe4e6; color: #c73754; }
+
+.ac-empty {
+  text-align: center;
+  color: #77758e;
+  font-size: 13px;
+  padding: 30px 0;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 900px) {
+  .ac-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,57 +1,79 @@
-
+from contextlib import closing
 from datetime import datetime, timezone
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, g
+import os
+import tempfile
 
-from backend.database import get_connection
+from werkzeug.exceptions import RequestEntityTooLarge
+
+from backend.authentication import require_auth
+from backend.pdf_cti_extractor import extract_cti_from_pdf
 from backend.advanced_cti_processor import (
     CATEGORIES,
-    INDICATOR_TYPES,
-    SEVERITIES,
     CONFIDENCES,
-    SECTORS,
-    SOURCE_TYPES,
+    INDICATOR_TYPES,
     RELIABILITIES,
-    validate_indicator,
+    SECTORS,
+    SEVERITIES,
+    SOURCE_TYPES,
     normalize_cti,
+    validate_indicator,
 )
+from backend.cti_knowledge_graph import build_knowledge_graph
+from backend.database import get_connection
+from backend.temporal_intelligence import analyze_temporal_intelligence
 
 advanced_cti_bp = Blueprint("advanced_cti", __name__)
 
+# --------------------------------------------------
+# CONSTANTS
+# --------------------------------------------------
 
-def calculate_risk(severity, confidence, reliability, submissions):
-    """Prototype risk score from 0 to 100."""
+SEVERITY_ORDER = {"unknown": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+CONFIDENCE_ORDER = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
+RELIABILITY_ORDER = {"unverified": 0, "partial": 1, "verified": 2}
 
-    severity_scores = {
-        "low": 20,
-        "medium": 40,
-        "high": 70,
-        "critical": 90,
-        "unknown": 20,
-    }
+SEVERITY_SCORES = {"low": 20, "medium": 40, "high": 70, "critical": 90, "unknown": 20}
+CONFIDENCE_SCORES = {"low": 40, "medium": 65, "high": 90, "unknown": 40}
+RELIABILITY_SCORES = {"unverified": 30, "partial": 60, "verified": 90}
 
-    confidence_scores = {
-        "low": 40,
-        "medium": 65,
-        "high": 90,
-        "unknown": 40,
-    }
+MAX_TITLE = 200
+MAX_TEXT = 10000
 
-    reliability_scores = {
-        "unverified": 30,
-        "partial": 60,
-        "verified": 90,
-    }
+REQUIRED_FIELDS = [
+    "organization_id",
+    "category",
+    "indicator_type",
+    "title",
+    "description",
+    "severity",
+    "confidence",
+    "sharing_sector",
+    "source_type",
+    "source_reliability",
+]
 
+
+# --------------------------------------------------
+# HELPERS
+# --------------------------------------------------
+
+def error(message, status=400, **extra):
+    return jsonify({"error": message, **extra}), status
+
+
+def calculate_risk(severity, confidence, reliability, corroborating_orgs):
+    """Prototype risk score (0-100). Not a statistical measure."""
     base = (
-        severity_scores[severity] * 0.50
-        + confidence_scores[confidence] * 0.30
-        + reliability_scores[reliability] * 0.20
+        SEVERITY_SCORES.get(severity, 20) * 0.50
+        + CONFIDENCE_SCORES.get(confidence, 40) * 0.30
+        + RELIABILITY_SCORES.get(reliability, 30) * 0.20
     )
 
-    # Additional independent submissions increase corroboration.
-    corroboration_bonus = min(max(submissions - 1, 0) * 5, 15)
-    score = min(round(base + corroboration_bonus), 100)
+    # +5 per additional independent organization, capped at +15.
+    bonus = min(max(corroborating_orgs - 1, 0) * 5, 15)
+    score = min(round(base + bonus), 100)
 
     if score >= 80:
         level = "Critical"
@@ -65,373 +87,343 @@ def calculate_risk(severity, confidence, reliability, submissions):
     return score, level
 
 
-@advanced_cti_bp.route("/api/cti/submit", methods=["POST"])
-def submit_cti():
-    data = request.get_json(silent=True)
+def parse_timestamp(value):
+    """Return a timezone-aware datetime or raise ValueError."""
+    if not isinstance(value, str) or len(value) > 50:
+        raise ValueError("observed_at must be an ISO timestamp string.")
+    parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
+
+def match_sector(value):
+    lookup = {sector.lower(): sector for sector in SECTORS}
+    return lookup.get(value.strip().lower())
+
+
+def parse_submission(data):
+    """Validate a payload. Returns (clean_dict, None) or (None, message)."""
     if not isinstance(data, dict):
-        return jsonify({
-            "error": "Send the submission as a JSON object."
-        }), 400
-
-    required_fields = [
-        "organization_id",
-        "category",
-        "indicator_type",
-        "title",
-        "description",
-        "severity",
-        "confidence",
-        "sharing_sector",
-        "source_type",
-        "source_reliability",
-    ]
+        return None, "Send the submission as a JSON object."
 
     missing = [
-        field for field in required_fields
-        if field not in data or data[field] is None
+        field for field in REQUIRED_FIELDS
+        if data.get(field) is None
         or (isinstance(data[field], str) and not data[field].strip())
     ]
-
     if missing:
-        return jsonify({
-            "error": "Missing required fields.",
-            "missing_fields": missing,
-        }), 400
+        return None, ("Missing required fields: " + ", ".join(missing))
 
+    raw_org = data["organization_id"]
+    if isinstance(raw_org, bool):
+        return None, "organization_id must be an integer."
     try:
-        organization_id = int(data["organization_id"])
+        organization_id = int(raw_org)
     except (TypeError, ValueError):
-        return jsonify({"error": "organization_id must be an integer."}), 400
-
+        return None, "organization_id must be an integer."
     if organization_id < 1:
-        return jsonify({"error": "Invalid organization_id."}), 400
+        return None, "Invalid organization_id."
 
-    category = str(data["category"]).strip().lower()
-    indicator_type = str(data["indicator_type"]).strip().lower()
-    severity = str(data["severity"]).strip().lower()
-    confidence = str(data["confidence"]).strip().lower()
-    sharing_sector = str(data["sharing_sector"]).strip().title()
-    source_type = str(data["source_type"]).strip().lower()
-    reliability = str(data["source_reliability"]).strip().lower()
+    clean = {"organization_id": organization_id}
 
-    if category not in CATEGORIES:
-        return jsonify({"error": "Unsupported CTI category."}), 400
+    choices = [
+        ("category", CATEGORIES, "Unsupported CTI category."),
+        ("indicator_type", INDICATOR_TYPES, "Unsupported indicator type."),
+        ("severity", SEVERITIES, "Unsupported severity."),
+        ("confidence", CONFIDENCES, "Unsupported confidence."),
+        ("source_type", SOURCE_TYPES, "Unsupported source type."),
+        ("source_reliability", RELIABILITIES, "Unsupported source reliability."),
+    ]
+    for field, allowed, message in choices:
+        value = str(data[field]).strip().lower()
+        if value not in allowed:
+            return None, message
+        clean[field] = value
 
-    if indicator_type not in INDICATOR_TYPES:
-        return jsonify({"error": "Unsupported indicator type."}), 400
-
-    if severity not in SEVERITIES:
-        return jsonify({"error": "Unsupported severity."}), 400
-
-    if confidence not in CONFIDENCES:
-        return jsonify({"error": "Unsupported confidence."}), 400
-
-    if sharing_sector not in SECTORS:
-        return jsonify({"error": "Unsupported sharing sector."}), 400
-
-    if source_type not in SOURCE_TYPES:
-        return jsonify({"error": "Unsupported source type."}), 400
-
-    if reliability not in RELIABILITIES:
-        return jsonify({"error": "Unsupported source reliability."}), 400
+    sector = match_sector(str(data["sharing_sector"]))
+    if sector is None:
+        return None, "Unsupported sharing sector."
+    clean["sharing_sector"] = sector
 
     title = str(data["title"]).strip()
     description = str(data["description"]).strip()
-
-    if len(title) > 200 or len(description) > 10000:
-        return jsonify({
-            "error": "Title must be at most 200 characters and description at most 10000."
-        }), 400
-
     if not title or not description:
-        return jsonify({
-            "error": "Title and description cannot be empty."
-        }), 400
+        return None, "Title and description cannot be empty."
+    if len(title) > MAX_TITLE or len(description) > MAX_TEXT:
+        return None, (
+            f"Title must be at most {MAX_TITLE} characters and "
+            f"description at most {MAX_TEXT}."
+        )
+    clean["title"] = title
+    clean["description"] = description
 
     try:
-        indicator_value = validate_indicator(
-            indicator_type,
-            data.get("indicator_value", ""),
+        clean["indicator_value"] = validate_indicator(
+            clean["indicator_type"], data.get("indicator_value", "")
         )
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
+    except ValueError as exc:
+        return None, str(exc)
 
     observed_at = data.get("observed_at")
     if observed_at is not None:
-        if not isinstance(observed_at, str) or len(observed_at) > 50:
-            return jsonify({
-                "error": "observed_at must be an ISO timestamp string."
-            }), 400
-
         try:
-            datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
-        except ValueError:
-            return jsonify({
-                "error": "Invalid observed_at timestamp."
-            }), 400
+            parsed = parse_timestamp(observed_at)
+        except ValueError as exc:
+            message = str(exc)
+            if "ISO timestamp string" not in message:
+                message = "Invalid observed_at timestamp."
+            return None, message
+        if parsed > datetime.now(timezone.utc):
+            return None, "observed_at cannot be in the future."
+    clean["observed_at"] = observed_at
 
-    evidence = data.get("evidence", "")
-    if not isinstance(evidence, str) or len(evidence) > 10000:
-        return jsonify({
-            "error": "Evidence must be text of at most 10000 characters."
-        }), 400
+    evidence = data.get("evidence")
+    if evidence is None:
+        evidence = ""
+    if not isinstance(evidence, str) or len(evidence) > MAX_TEXT:
+        return None, f"Evidence must be text of at most {MAX_TEXT} characters."
+    clean["evidence"] = evidence
 
-    connection = get_connection()
+    return clean, None
 
-    try:
-        organization = connection.execute(
-            "SELECT id, name FROM organizations WHERE id = ?",
-            (organization_id,),
-        ).fetchone()
 
-        if organization is None:
-            return jsonify({
-                "error": "Organization not found. Register it first."
-            }), 404
+def insert_submission(connection, record_id, c):
+    connection.execute(
+        """
+        INSERT INTO cti_submissions (
+            cti_record_id, organization_id, source_type,
+            source_reliability, observed_at, submitted_severity,
+            confidence, evidence
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            record_id,
+            c["organization_id"],
+            c["source_type"],
+            c["source_reliability"],
+            c.get("observed_at"),
+            c["severity"],
+            c["confidence"],
+            c["evidence"],
+        ),
+    )
 
-        # Find a duplicate indicator. Descriptive CTI without an indicator
-        # is kept as a separate record.
-        existing = None
 
-        if indicator_type != "none":
-            existing = connection.execute(
-                """
-                SELECT id, severity, confidence, risk_score
-                FROM cti_records
-                WHERE indicator_type = ?
-                  AND indicator_value = ?
-                  AND sharing_sector = ?
-                ORDER BY id
-                LIMIT 1
-                """,
-                (indicator_type, indicator_value, sharing_sector),
+def submission_stats(connection, record_id):
+    """Return (total submissions, distinct orgs, best reliability)."""
+    total, orgs = connection.execute(
+        """
+        SELECT COUNT(*), COUNT(DISTINCT organization_id)
+        FROM cti_submissions
+        WHERE cti_record_id = ?
+        """,
+        (record_id,),
+    ).fetchone()
+
+    rows = connection.execute(
+        "SELECT source_reliability FROM cti_submissions WHERE cti_record_id = ?",
+        (record_id,),
+    ).fetchall()
+    best = max(
+        (row["source_reliability"] for row in rows),
+        key=lambda v: RELIABILITY_ORDER.get(v, 0),
+        default="unverified",
+    )
+    return total, orgs, best
+
+
+# --------------------------------------------------
+# SUBMIT CTI
+# --------------------------------------------------
+
+@advanced_cti_bp.route("/api/cti/submit", methods=["POST"])
+def submit_cti():
+    c, problem = parse_submission(request.get_json(silent=True))
+    if problem:
+        return error(problem)
+
+    with closing(get_connection()) as connection:
+        try:
+            # Take the write lock up front so duplicate detection and the
+            # insert are atomic across concurrent requests.
+            connection.execute("BEGIN IMMEDIATE")
+
+            organization = connection.execute(
+                "SELECT id, name FROM organizations WHERE id = ?",
+                (c["organization_id"],),
             ).fetchone()
+            if organization is None:
+                connection.rollback()
+                return error("Organization not found. Register it first.", 404)
 
-        if existing:
-            record_id = existing["id"]
+            existing = None
+            if c["indicator_type"] != "none":
+                existing = connection.execute(
+                    """
+                    SELECT id, severity, confidence
+                    FROM cti_records
+                    WHERE indicator_type = ?
+                      AND indicator_value = ?
+                      AND sharing_sector = ?
+                    ORDER BY id
+                    LIMIT 1
+                    """,
+                    (
+                        c["indicator_type"],
+                        c["indicator_value"],
+                        c["sharing_sector"],
+                    ),
+                ).fetchone()
 
-            previous_count = connection.execute(
-                """
-                SELECT COUNT(*) FROM cti_submissions
-                WHERE cti_record_id = ?
-                """,
-                (record_id,),
-            ).fetchone()[0]
+            # ---------- duplicate: merge into existing record ----------
+            if existing:
+                record_id = existing["id"]
+                insert_submission(connection, record_id, c)
 
-            # Retain the separate source report.
-            connection.execute(
-                """
-                INSERT INTO cti_submissions (
-                    cti_record_id, organization_id, source_type,
-                    source_reliability, observed_at, submitted_severity,
-                    confidence, evidence
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    record_id,
-                    organization_id,
-                    source_type,
-                    reliability,
-                    observed_at,
-                    severity,
-                    confidence,
-                    evidence,
-                ),
+                final_severity = max(
+                    [existing["severity"], c["severity"]],
+                    key=lambda v: SEVERITY_ORDER.get(v, 0),
+                )
+                final_confidence = max(
+                    [existing["confidence"], c["confidence"]],
+                    key=lambda v: CONFIDENCE_ORDER.get(v, 0),
+                )
+                total, orgs, final_reliability = submission_stats(
+                    connection, record_id
+                )
+                risk_score, risk_level = calculate_risk(
+                    final_severity, final_confidence, final_reliability, orgs
+                )
+
+                connection.execute(
+                    """
+                    UPDATE cti_records
+                    SET severity = ?, confidence = ?,
+                        risk_score = ?, risk_level = ?,
+                        status = 'Under Review'
+                    WHERE id = ?
+                    """,
+                    (
+                        final_severity,
+                        final_confidence,
+                        risk_score,
+                        risk_level,
+                        record_id,
+                    ),
+                )
+                connection.commit()
+
+                return jsonify({
+                    "message": "Duplicate indicator detected; submission recorded.",
+                    "duplicate": True,
+                    "record_id": record_id,
+                    "submission_count": total,
+                    "corroborating_organizations": orgs,
+                    "risk_score": risk_score,
+                    "risk_level": risk_level,
+                }), 200
+
+            # ---------- new record ----------
+            stix_data = normalize_cti(
+                c["category"],
+                c["indicator_type"],
+                c["indicator_value"],
+                c["title"],
+                c["description"],
+                c["severity"],
             )
-
-            # Use the strongest reported severity and confidence.
-            severity_order = {
-                "unknown": 0, "low": 1, "medium": 2,
-                "high": 3, "critical": 4,
-            }
-            confidence_order = {
-                "unknown": 0, "low": 1, "medium": 2, "high": 3,
-            }
-
-            final_severity = max(
-                [existing["severity"], severity],
-                key=lambda value: severity_order[value],
-            )
-            final_confidence = max(
-                [existing["confidence"], confidence],
-                key=lambda value: confidence_order[value],
-            )
-
-            # Conservative aggregation: use the strongest reliability
-            # among submissions for this record.
-            reliability_rows = connection.execute(
-                """
-                SELECT source_reliability
-                FROM cti_submissions
-                WHERE cti_record_id = ?
-                """,
-                (record_id,),
-            ).fetchall()
-
-            reliability_order = {
-                "unverified": 0, "partial": 1, "verified": 2,
-            }
-            final_reliability = max(
-                [row["source_reliability"] for row in reliability_rows],
-                key=lambda value: reliability_order[value],
-            )
-
-            submission_count = previous_count + 1
-
             risk_score, risk_level = calculate_risk(
-                final_severity,
-                final_confidence,
-                final_reliability,
-                submission_count,
+                c["severity"], c["confidence"], c["source_reliability"], 1
             )
 
-            connection.execute(
+            cursor = connection.execute(
                 """
-                UPDATE cti_records
-                SET severity = ?, confidence = ?,
-                    risk_score = ?, risk_level = ?,
-                    status = 'Under Review'
-                WHERE id = ?
+                INSERT INTO cti_records (
+                    category, indicator_type, indicator_value, title,
+                    description, severity, confidence, sharing_sector,
+                    stix_data, risk_score, risk_level, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    final_severity,
-                    final_confidence,
+                    c["category"],
+                    c["indicator_type"],
+                    c["indicator_value"],
+                    c["title"],
+                    c["description"],
+                    c["severity"],
+                    c["confidence"],
+                    c["sharing_sector"],
+                    stix_data,
                     risk_score,
                     risk_level,
-                    record_id,
+                    "Under Review",
                 ),
             )
-
+            record_id = cursor.lastrowid
+            insert_submission(connection, record_id, c)
             connection.commit()
 
             return jsonify({
-                "message": "Duplicate indicator detected; submission recorded.",
-                "duplicate": True,
+                "message": "CTI submitted and normalized successfully.",
+                "duplicate": False,
                 "record_id": record_id,
-                "submission_count": submission_count,
                 "risk_score": risk_score,
                 "risk_level": risk_level,
-            }), 200
+                "stix": stix_data,
+            }), 201
 
-        stix_data = normalize_cti(
-            category,
-            indicator_type,
-            indicator_value,
-            title,
-            description,
-            severity,
-        )
+        except Exception:
+            connection.rollback()
+            current_app.logger.exception("CTI submission failed.")
+            return error("The CTI submission could not be processed.", 500)
 
-        risk_score, risk_level = calculate_risk(
-            severity, confidence, reliability, 1
-        )
 
-        cursor = connection.execute(
-            """
-            INSERT INTO cti_records (
-                category, indicator_type, indicator_value, title,
-                description, severity, confidence, sharing_sector,
-                stix_data, risk_score, risk_level, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                category,
-                indicator_type,
-                indicator_value,
-                title,
-                description,
-                severity,
-                confidence,
-                sharing_sector,
-                stix_data,
-                risk_score,
-                risk_level,
-                "Under Review",
-            ),
-        )
-
-        record_id = cursor.lastrowid
-
-        connection.execute(
-            """
-            INSERT INTO cti_submissions (
-                cti_record_id, organization_id, source_type,
-                source_reliability, observed_at, submitted_severity,
-                confidence, evidence
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                record_id,
-                organization_id,
-                source_type,
-                reliability,
-                observed_at,
-                severity,
-                confidence,
-                evidence,
-            ),
-        )
-
-        connection.commit()
-
-        return jsonify({
-            "message": "CTI submitted and normalized successfully.",
-            "duplicate": False,
-            "record_id": record_id,
-            "risk_score": risk_score,
-            "risk_level": risk_level,
-            "stix": stix_data,
-        }), 201
-
-    except Exception:
-        connection.rollback()
-        # Do not expose internal database or server details.
-        return jsonify({
-            "error": "The CTI submission could not be processed."
-        }), 500
-
-    finally:
-        connection.close()
-
+# --------------------------------------------------
+# LIST ADVANCED CTI RECORDS
+# --------------------------------------------------
 
 @advanced_cti_bp.route("/api/cti/advanced", methods=["GET"])
 def list_advanced_cti():
-    connection = get_connection()
+    limit = min(max(request.args.get("limit", default=100, type=int), 1), 500)
+    offset = max(request.args.get("offset", default=0, type=int), 0)
 
-    try:
+    with closing(get_connection()) as connection:
         rows = connection.execute(
             """
-            SELECT id, category, indicator_type, indicator_value,
-                   title, description, severity, confidence,
-                   sharing_sector, risk_score, risk_level, status,
-                   created_at
+            SELECT id, category, indicator_type, indicator_value, title,
+                   description, severity, confidence, sharing_sector,
+                   risk_score, risk_level, status, created_at
             FROM cti_records
             ORDER BY id DESC
-            """
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
         ).fetchall()
 
-        return jsonify({"records": [dict(row) for row in rows]})
+    return jsonify({
+        "records": [dict(row) for row in rows],
+        "limit": limit,
+        "offset": offset,
+    }), 200
 
-    finally:
-        connection.close()
 
+# --------------------------------------------------
+# LIST SUBMISSIONS FOR ONE CTI RECORD
+# --------------------------------------------------
 
 @advanced_cti_bp.route(
-    "/api/cti/advanced/<int:record_id>/submissions",
-    methods=["GET"],
+    "/api/cti/advanced/<int:record_id>/submissions", methods=["GET"]
 )
 def list_cti_submissions(record_id):
-    connection = get_connection()
-
-    try:
+    with closing(get_connection()) as connection:
         record = connection.execute(
-            "SELECT id FROM cti_records WHERE id = ?",
-            (record_id,),
+            "SELECT id FROM cti_records WHERE id = ?", (record_id,)
         ).fetchone()
-
         if record is None:
-            return jsonify({"error": "CTI record not found."}), 404
+            return error("CTI record not found.", 404)
 
         rows = connection.execute(
             """
@@ -440,12 +432,202 @@ def list_cti_submissions(record_id):
                    confidence, evidence, created_at
             FROM cti_submissions
             WHERE cti_record_id = ?
-            ORDER BY id
+            ORDER BY created_at, id
             """,
             (record_id,),
         ).fetchall()
 
-        return jsonify({"submissions": [dict(row) for row in rows]})
+    return jsonify({"submissions": [dict(row) for row in rows]}), 200
+
+
+# --------------------------------------------------
+# TEMPORAL EVIDENCE TIMELINE
+# --------------------------------------------------
+
+@advanced_cti_bp.route(
+    "/api/cti/advanced/<int:record_id>/evidence-timeline", methods=["GET"]
+)
+def get_cti_evidence_timeline(record_id):
+    """
+    Source submission history for one CTI record.
+
+    Observation time and submission time stay distinct, and severity
+    disagreements are reported rather than hidden.
+    """
+    with closing(get_connection()) as connection:
+        record_row = connection.execute(
+            """
+            SELECT id, title, category, indicator_type, indicator_value,
+                   severity, confidence, risk_score, risk_level, created_at
+            FROM cti_records
+            WHERE id = ?
+            """,
+            (record_id,),
+        ).fetchone()
+        if record_row is None:
+            return error("CTI record not found.", 404)
+
+        rows = connection.execute(
+            """
+            SELECT
+                s.id AS submission_id,
+                s.cti_record_id,
+                s.organization_id,
+                o.name AS organization_name,
+                o.sector AS organization_sector,
+                s.source_type,
+                s.source_reliability,
+                s.observed_at,
+                s.submitted_severity,
+                s.confidence,
+                s.evidence,
+                s.created_at AS submitted_at
+            FROM cti_submissions AS s
+            LEFT JOIN organizations AS o ON o.id = s.organization_id
+            WHERE s.cti_record_id = ?
+            ORDER BY s.created_at, s.id
+            """,
+            (record_id,),
+        ).fetchall()
+
+    submissions = [dict(row) for row in rows]
+
+    def distinct_values(key):
+        return sorted({
+            str(item[key]).strip().lower()
+            for item in submissions
+            if item[key] is not None and str(item[key]).strip()
+        })
+
+    severity_values = distinct_values("submitted_severity")
+    reliability_values = distinct_values("source_reliability")
+
+    total = len(submissions)
+    with_time = sum(
+        1 for item in submissions
+        if isinstance(item["observed_at"], str) and item["observed_at"].strip()
+    )
+
+    if with_time == 0:
+        observation_time_status = "missing"
+    elif with_time < total:
+        observation_time_status = "partial"
+    else:
+        observation_time_status = "complete"
+
+    return jsonify({
+        "record": dict(record_row),
+        "submission_count": total,
+        "severity_conflict": len(severity_values) > 1,
+        "reported_severities": severity_values,
+        "reliability_levels": reliability_values,
+        "observation_time_status": observation_time_status,
+        "timeline": submissions,
+    }), 200
+
+
+# --------------------------------------------------
+# CTI KNOWLEDGE GRAPH API
+# --------------------------------------------------
+
+@advanced_cti_bp.route("/api/cti/knowledge-graph", methods=["GET"])
+def get_knowledge_graph():
+    """Read-only view of the CTI knowledge graph."""
+    try:
+        return jsonify(build_knowledge_graph()), 200
+    except Exception:
+        current_app.logger.exception("Failed to build CTI knowledge graph")
+        return error("Unable to build the CTI knowledge graph", 500)
+
+# --------------------------------------------------
+# TEMPORAL INTELLIGENCE API
+# --------------------------------------------------
+
+@advanced_cti_bp.route("/api/cti/temporal-intelligence", methods=["GET"])
+def get_temporal_intelligence():
+    """Return read-only temporal CTI evidence analysis."""
+    try:
+        report = analyze_temporal_intelligence()
+        return jsonify(report), 200
+    except Exception:
+        current_app.logger.exception("Temporal intelligence analysis failed")
+        return error("Temporal intelligence analysis failed.", 500)
+
+
+# --------------------------------------------------
+# PDF-TO-CTI EXTRACTION API
+# --------------------------------------------------
+
+MAX_UPLOAD_BYTES = 15 * 1024 * 1024
+
+
+@advanced_cti_bp.route("/api/cti/extract-pdf", methods=["POST"])
+@require_auth
+def extract_cti_pdf():
+    """Extract candidate CTI findings from an authenticated PDF upload.
+
+    This endpoint does not write extracted findings to the database.
+    """
+    uploaded_file = request.files.get("file")
+
+    if uploaded_file is None or not uploaded_file.filename:
+        return error("Please upload a PDF using the 'file' field.", 400)
+
+    if not uploaded_file.filename.lower().endswith(".pdf"):
+        return error("Only PDF files are supported.", 400)
+
+    temporary_path = None
+
+    try:
+        # Store the upload in a temporary file, not in the project directory.
+        with tempfile.NamedTemporaryFile(
+            prefix="cti_upload_",
+            suffix=".pdf",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = temporary_file.name
+            total_bytes = 0
+
+            while True:
+                chunk = uploaded_file.stream.read(64 * 1024)
+
+                if not chunk:
+                    break
+
+                total_bytes += len(chunk)
+
+                if total_bytes > MAX_UPLOAD_BYTES:
+                    return error("PDF exceeds the 15 MB upload limit.", 413)
+
+                temporary_file.write(chunk)
+
+        # Basic file signature check; the extractor also validates the PDF.
+        with open(temporary_path, "rb") as pdf_file:
+            if not pdf_file.read(5).startswith(b"%PDF-"):
+                return error("The uploaded file is not a valid PDF file.", 400)
+
+        result = extract_cti_from_pdf(temporary_path)
+
+        return jsonify({
+            "message": "PDF extraction completed. Review findings before use.",
+            "organization_id": g.current_user["organization_id"],
+            "filename": os.path.basename(uploaded_file.filename),
+            "extraction": result,
+            "saved_to_database": False,
+        }), 200
+
+    except ValueError as exc:
+        return error(str(exc), 400)
+
+    except Exception:
+        current_app.logger.exception("PDF-to-CTI extraction failed")
+        return error("Unable to process the uploaded PDF.", 500)
 
     finally:
-        connection.close()
+        if temporary_path and os.path.exists(temporary_path):
+            try:
+                os.remove(temporary_path)
+            except OSError:
+                current_app.logger.warning(
+                    "Could not remove temporary PDF file."
+                )

@@ -32,6 +32,7 @@ INDICATOR_TYPES = {
     "sha256",
     "cve",
     "none",
+    "attack_technique",
 }
 
 SEVERITIES = {
@@ -77,6 +78,11 @@ RELIABILITIES = {
 
 
 def validate_indicator(indicator_type, value):
+    if indicator_type == "attack_technique":
+        v = str(value or "").strip().upper()
+        if not re.match(r"^T\d{4}(\.\d{3})?$", v):
+            raise ValueError("Invalid ATT&CK technique ID.")
+        return v
     """Validate an indicator based on its type."""
 
     value = (value or "").strip()

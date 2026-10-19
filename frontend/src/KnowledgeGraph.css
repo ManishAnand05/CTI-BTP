@@ -1,0 +1,369 @@
+.kg-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  color: #45435f;
+  height: 100%;
+}
+
+.kg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+}
+
+.kg-header h2 {
+  margin: 8px 0;
+  color: #292454;
+  font-size: 24px;
+  letter-spacing: -0.7px;
+}
+
+.kg-header p {
+  max-width: 650px;
+  margin: 0;
+  color: #77758e;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.kg-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #7062e8;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+}
+
+.kg-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid #e8e6f1;
+  border-radius: 9px;
+  background: #fff;
+  color: #292454;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.kg-button:hover {
+  border-color: #c9c2ff;
+  background: #f7f5ff;
+}
+
+.kg-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.kg-spin {
+  animation: kg-rotate 1s linear infinite;
+}
+
+@keyframes kg-rotate {
+  to { transform: rotate(360deg); }
+}
+
+/* --- METRICS --- */
+.kg-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.kg-metric {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #e8e6f1;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(37, 35, 69, 0.04);
+}
+
+.kg-metric-icon {
+  display: grid;
+  place-items: center;
+  grid-row: span 2;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: #f0edff;
+  color: #7062e8;
+}
+
+.kg-metric-icon.alert {
+  background: #fff0f3;
+  color: #c73754;
+}
+
+.kg-metric-label {
+  color: #77758e;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.kg-metric > strong {
+  color: #292454;
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+/* --- LEGEND --- */
+.kg-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 0 2px;
+}
+
+.kg-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #625e80;
+  font-size: 12px;
+}
+
+.kg-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  /* NEW: Glow effect for the colorful legend dots */
+  box-shadow: 0 0 6px currentColor;
+}
+
+.kg-legend .kg-edge-key {
+  width: 18px;
+  height: 2px;
+  border-radius: 0;
+  background: #b9b5ce;
+  box-shadow: none;
+}
+
+/* --- MAIN GRAPH LAYOUT --- */
+.kg-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  align-items: stretch;
+  gap: 20px;
+  /* INCREASED HEIGHT so the graph has room to spread out */
+  height: calc(100vh - 280px);
+  min-height: 600px;
+}
+
+.kg-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #e8e6f1;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(37, 35, 69, 0.04);
+}
+
+/* Dark Canvas for the Graph */
+.kg-canvas-wrapper {
+  background: #0f172a;
+  position: relative;
+  border: 1px solid #334155;
+  height: 100%;
+  min-height: 650px;
+}
+
+/* Inspector Panel */
+.kg-inspector {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.kg-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 16px;
+  color: #7062e8;
+}
+
+.kg-panel-heading h3 {
+  margin: 0;
+  color: #292454;
+  font-size: 15px;
+}
+
+.kg-toolbar {
+  display: flex;
+  gap: 10px;
+}
+
+.kg-search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #e8e6f1;
+  border-radius: 8px;
+  color: #77758e;
+}
+
+.kg-search input {
+  width: 100%;
+  padding: 10px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #292454;
+  font-size: 12px;
+}
+
+.kg-toolbar select {
+  padding: 0 10px;
+  border: 1px solid #e8e6f1;
+  border-radius: 8px;
+  background: #fff;
+  color: #45435f;
+  font-size: 12px;
+  outline: none;
+}
+
+/* Details Panel */
+.kg-details {
+  margin-top: 16px;
+}
+
+.kg-details h3 {
+  margin: 8px 0 17px;
+  color: #292454;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.kg-detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0eff6;
+}
+
+.kg-detail-row span {
+  color: #77758e;
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.kg-detail-row strong {
+  color: #45435f;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Conflicts Section */
+.kg-conflicts {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #e8e6f1;
+}
+
+.kg-conflict {
+  margin-bottom: 12px;
+  padding: 14px;
+  border: 1px solid #ffd7df;
+  border-radius: 10px;
+  background: #fff8fa;
+}
+
+.kg-conflict > strong {
+  color: #292454;
+  font-size: 13px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.kg-severity-list {
+  margin: 10px 0;
+  font-size: 12px;
+}
+
+.kg-severity-list span {
+  color: #c73754;
+  font-weight: 600;
+}
+
+.kg-conflict small {
+  color: #77758e;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* Utility States */
+.kg-empty,
+.kg-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 140px;
+  color: #77758e;
+  font-size: 12px;
+  text-align: center;
+}
+
+.kg-muted {
+  color: #77758e;
+  font-size: 12px;
+}
+
+.kg-error,
+.kg-inline-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid #ffd7df;
+  border-radius: 11px;
+  background: #fff0f3;
+  color: #b8324d;
+  font-size: 13px;
+}
+
+/* Responsiveness */
+@media (max-width: 1050px) {
+  .kg-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kg-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .kg-canvas-wrapper {
+    height: 600px;
+  }
+}
+
+@media (max-width: 600px) {
+  .kg-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .kg-metrics {
+    grid-template-columns: 1fr;
+  }
+}

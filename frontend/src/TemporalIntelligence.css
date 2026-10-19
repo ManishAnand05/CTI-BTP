@@ -1,0 +1,278 @@
+.ti-page {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ti-header h2 {
+  margin: 0 0 8px 0;
+  color: #292454;
+  font-size: 24px;
+}
+
+.ti-header p {
+  margin: 0;
+  color: #77758e;
+  font-size: 13px;
+}
+
+.ti-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ti-card {
+  display: grid;
+  grid-template-columns: 350px 1fr;
+  background: #fff;
+  border: 1px solid #e8e6f1;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 3px 12px rgba(37, 35, 69, 0.04);
+}
+
+/* LEFT PANEL */
+.ti-card-left {
+  padding: 24px;
+  background: #fbfbfe;
+  border-right: 1px solid #e8e6f1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ti-ioc-header h3 {
+  margin: 4px 0 0 0;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px;
+  color: #292454;
+  word-break: break-all;
+}
+
+.ti-type {
+  font-size: 10px;
+  font-weight: 700;
+  color: #7062e8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ti-risk-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0;
+}
+
+.circular-chart {
+  width: 100px;
+  height: 100px;
+}
+
+.circle-bg {
+  fill: none;
+  stroke: #eee;
+  stroke-width: 3.8;
+}
+
+.circle {
+  fill: none;
+  stroke: #7062e8;
+  stroke-width: 3.8;
+  stroke-linecap: round;
+  transition: stroke-dasharray 1s ease-out;
+}
+
+.percentage {
+  fill: #292454;
+  font-family: 'Inter', sans-serif;
+  font-size: 8px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+
+.ti-risk-label {
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #77758e;
+  text-transform: uppercase;
+}
+
+.ti-explanation h4, 
+.ti-sectors h4 {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: #292454;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ti-explanation ul {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: #625e80;
+  line-height: 1.5;
+}
+
+.ti-sector-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ti-sector-tags span {
+  background: #f0edff;
+  color: #7062e8;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* RIGHT PANEL (Timeline) */
+.ti-card-right {
+  padding: 24px;
+}
+
+.ti-card-right h4 {
+  margin: 0 0 20px 0;
+  font-size: 14px;
+  color: #292454;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ti-timeline {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* Vertical Line exactly in the center of the dots */
+.ti-timeline::before {
+  content: '';
+  position: absolute;
+  top: 10px;
+  bottom: 0;
+  left: 7.5px; 
+  width: 2px;
+  background: #e8e6f1;
+}
+
+.ti-timeline-item {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 20px;
+  position: relative;
+}
+
+.ti-timeline-item:last-child {
+  margin-bottom: 0;
+}
+
+.ti-timeline-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 3px solid #7062e8;
+  flex-shrink: 0;
+  z-index: 1;
+  margin-top: 2px;
+}
+
+.ti-timeline-content {
+  flex: 1;
+  background: #fbfbfe;
+  border: 1px solid #e8e6f1;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.ti-timeline-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.ti-timeline-header strong {
+  font-size: 13px;
+  color: #292454;
+}
+
+.ti-date {
+  font-size: 11px;
+  color: #77758e;
+}
+
+.ti-timeline-body {
+  font-size: 12px;
+  color: #625e80;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ti-sev {
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.ti-sev.critical { background: #fff0f3; color: #c73754; }
+.ti-sev.high { background: #fff6e5; color: #b7791f; }
+.ti-sev.medium { background: #eef0ff; color: #5284f5; }
+.ti-sev.low { background: #f0fdf4; color: #168568; }
+
+.ti-sector-badge {
+  font-size: 10px;
+  color: #77758e;
+  background: #eee;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* States */
+.ti-state, .ti-error {
+  padding: 40px;
+  text-align: center;
+  color: #77758e;
+  font-size: 14px;
+}
+
+.ti-error {
+  color: #c73754;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.ti-retry-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #fff;
+  border: 1px solid #e8e6f1;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .ti-card {
+    grid-template-columns: 1fr;
+  }
+  .ti-card-left {
+    border-right: none;
+    border-bottom: 1px solid #e8e6f1;
+  }
+}

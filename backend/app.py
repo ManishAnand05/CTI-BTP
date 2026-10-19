@@ -1,653 +1,569 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import json
+from backend.graph_analytics import analyze_graph_centrality
+from backend.ai_predictor import predict_threat_severity
+from backend.temporal_engine import calculate_decayed_risk
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from backend.crypto_engine import encrypt_payload, decrypt_payload, revoke_access, restore_access
 import ipaddress
+import json
+import re
 import sqlite3
+import threading
+import time
+from datetime import datetime
+
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+
+from backend.advanced_cti import advanced_cti_bp
 from backend.authentication import (
-    register_user,
-    authenticate_user,
-    create_access_token,
-    verify_access_token,
-    require_auth,
-)
-from backend.cti_processor import process_cti
-from backend.database import (
-    initialize_database,
-    save_indicator,
-    get_all_indicators,
+    authenticate_user, create_access_token, register_user, require_auth, verify_access_token,
 )
 from backend.correlation import correlate_indicators
-from backend.risk_analysis import calculate_risk
+from backend.cti_processor import process_cti
+from backend.database import (
+    get_all_indicators, initialize_database, save_indicator, get_connection,
+)
 from backend.organizations import (
-    register_organization,
-    get_all_organizations,
-    get_organization,
-    update_organization,
-    update_trust_score,
-    update_policy_violations,
-    set_organization_status,
-    get_trust_level,
+    get_all_organizations, get_organization, register_organization,
+    set_organization_status, update_organization, update_policy_violations, update_trust_score,
 )
 from backend.policy_engine import (
-    generate_access_policy,
-    generate_advanced_access_policy,
+    generate_access_policy, generate_advanced_access_policy,
 )
-from backend.advanced_cti import advanced_cti_bp
+from backend.risk_analysis import calculate_risk
+from backend.knowledge_graph import build_temporal_graph, detect_contradictions
+
+
+# --------------------------------------------------
+# CONFIGURATION
+# --------------------------------------------------
+MAX_REQUEST_BYTES = 16 * 1024 * 1024
+LEGACY_SECTORS = ["Finance", "Healthcare", "Education", "Technology", "Government", "Energy"]
+LEGACY_SEVERITIES = ("low", "medium", "high", "critical")
+MAX_NAME_LENGTH = 100
+MAX_EMAIL_LENGTH = 254
+MAX_PASSWORD_LENGTH = 128
+
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 5 * 60
+REGISTER_MAX_ATTEMPTS = 10
+REGISTER_WINDOW_SECONDS = 60 * 60
+
+DEV_ORIGINS = [f"http://{host}:{port}" for host in ("localhost", "127.0.0.1") for port in (5173, 5174, 5175)]
+EXTRA_ORIGINS = [origin.strip() for origin in os.environ.get("CORS_ORIGINS", "").split(",") if origin.strip()]
+
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
+
 CORS(
     app,
     resources={
         r"/api/*": {
-            "origins": [
-                "http://localhost:5173",
-                "http://127.0.0.1:5173",
-            ]
+            "origins": DEV_ORIGINS + EXTRA_ORIGINS,
+            "allow_headers": ["Authorization", "Content-Type"],
+            "expose_headers": ["Retry-After"],
+            "max_age": 600,
         }
     },
 )
 
-# Register advanced CTI endpoints.
 app.register_blueprint(advanced_cti_bp)
-
-# Initialize database without deleting existing data.
 initialize_database()
 
-# --------------------------------------------------
-
-# Helper functions
 
 # --------------------------------------------------
+# RATE LIMITING
+# --------------------------------------------------
+class AttemptLimiter:
+    def __init__(self, max_attempts, window_seconds, max_keys=10000):
+        self.max_attempts = max_attempts
+        self.window = window_seconds
+        self.max_keys = max_keys
+        self._attempts = {}
+        self._lock = threading.Lock()
+
+    def _recent(self, key, now):
+        stamps = [stamp for stamp in self._attempts.get(key, []) if now - stamp < self.window]
+        if stamps:
+            self._attempts[key] = stamps
+        else:
+            self._attempts.pop(key, None)
+        return stamps
+
+    def retry_after(self, key):
+        now = time.monotonic()
+        with self._lock:
+            stamps = self._recent(key, now)
+            if len(stamps) < self.max_attempts:
+                return 0
+            return max(1, int(self.window - (now - stamps[0])) + 1)
+
+    def record(self, key):
+        now = time.monotonic()
+        with self._lock:
+            if len(self._attempts) >= self.max_keys:
+                self._attempts.clear()
+            self._recent(key, now)
+            self._attempts.setdefault(key, []).append(now)
+
+    def clear(self, key):
+        with self._lock:
+            self._attempts.pop(key, None)
+
+login_limiter = AttemptLimiter(LOGIN_MAX_FAILURES, LOGIN_WINDOW_SECONDS)
+register_limiter = AttemptLimiter(REGISTER_MAX_ATTEMPTS, REGISTER_WINDOW_SECONDS)
+
+
+# --------------------------------------------------
+# HELPERS
+# --------------------------------------------------
+def error_response(message, status=400, **extra):
+    return jsonify({"error": message, **extra}), status
+
+def too_many_requests(wait_seconds):
+    response = jsonify({"error": "Too many attempts.", "retry_after_seconds": wait_seconds})
+    response.status_code = 429
+    response.headers["Retry-After"] = str(wait_seconds)
+    return response
+
+def get_json_object():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
+
 def valid_positive_id(value):
     return type(value) is int and value > 0
+
 def organization_not_found_response(organization_id):
-    return jsonify({
-        "error": "Organization not found",
-        "organization_id": organization_id,
-    }), 404
+    return error_response("Organization not found", 404, organization_id=organization_id)
+
+def clean_email(value):
+    return value.strip().lower() if isinstance(value, str) else value
+
+def public_user(user):
+    return {key: value for key, value in user.items() if "password" not in key.lower()}
+
+def bearer_token():
+    parts = request.headers.get("Authorization", "").split()
+    return parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" else None
+
+def current_user():
+    token = bearer_token()
+    if not token:
+        return None
+    try:
+        return verify_access_token(token)
+    except Exception:
+        app.logger.exception("Token verification failed")
+        return None
+
+def defang_and_normalize(value):
+    if not isinstance(value, str):
+        return value
+    value = value.replace("[.]", ".").replace("(.)", ".").replace("{.}", ".")
+    value = value.replace("hxxp", "http").replace("hxxps", "https")
+    value = value.replace("[", "").replace("]", "")
+    return value.strip().lower()
+
 
 # --------------------------------------------------
+# GLOBAL HANDLERS
+# --------------------------------------------------
+@app.after_request
+def add_response_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    if request.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
-# 1. Home API
+@app.errorhandler(404)
+def handle_not_found(_error):
+    return error_response("Resource not found", 404)
 
+@app.errorhandler(405)
+def handle_method_not_allowed(_error):
+    return error_response("Method not allowed", 405)
+
+@app.errorhandler(413)
+def handle_too_large(_error):
+    return error_response(f"The request is too large (limit {MAX_REQUEST_BYTES // (1024*1024)} MiB).", 413)
+
+@app.errorhandler(500)
+def handle_server_error(_error):
+    return error_response("Internal server error", 500)
+
+
+# --------------------------------------------------
+# ROUTES
 # --------------------------------------------------
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "project": "CTI-BTP",
-        "status": "Backend running",
-        "message": "Cyber Threat Intelligence API is ready",
-    }), 200
+    return jsonify({"project": "CTI-BTP", "status": "Backend running"}), 200
 
-# --------------------------------------------------
+@app.route("/api/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
 
-# 2. Submit and process legacy CTI
-
-# --------------------------------------------------
-@app.route("/api/cti", methods=["POST"])
-def receive_cti():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    ip_address = data.get("ip_address")
-    description = data.get("description")
-    severity = data.get("severity")
-    sharing_sector = data.get("sharing_sector", "All")
-    if not all([ip_address, description, severity]):
-        return jsonify({
-            "error": (
-                "ip_address, description, and severity are required"
-            )
-        }), 400
-    if not isinstance(ip_address, str):
-        return jsonify({"error": "IP address must be text"}), 400
-    try:
-        ip_obj = ipaddress.ip_address(ip_address)
-        if ip_obj.version != 4:
-            return jsonify({
-                "error": "Only IPv4 addresses are supported"
-            }), 400
-    except ValueError:
-        return jsonify({"error": "Invalid IPv4 address"}), 400
-    if not isinstance(description, str) or not description.strip():
-        return jsonify({
-            "error": "Description must be a non-empty string"
-        }), 400
-    if not isinstance(severity, str):
-        return jsonify({"error": "Severity must be text"}), 400
-    severity = severity.strip().lower()
-    if severity not in ["low", "medium", "high", "critical"]:
-        return jsonify({
-            "error": "Severity must be low, medium, high, or critical"
-        }), 400
-    if not isinstance(sharing_sector, str) or not sharing_sector.strip():
-        return jsonify({
-            "error": "sharing_sector must be a non-empty string"
-        }), 400
-    supported_sectors = [
-        "Finance",
-        "Healthcare",
-        "Education",
-        "Technology",
-        "Government",
-        "Energy",
-    ]
-    sharing_sector = sharing_sector.strip()
-    if sharing_sector.lower() == "all":
-        sharing_sector = "All"
-    else:
-        matched_sector = next(
-            (
-                sector
-                for sector in supported_sectors
-                if sector.lower() == sharing_sector.lower()
-            ),
-            None,
-        )
-        if matched_sector is None:
-            return jsonify({
-                "error": "Unsupported sharing sector",
-                "supported_sectors": supported_sectors + ["All"],
-            }), 400
-        sharing_sector = matched_sector
-    try:
-        result = process_cti(
-            ip_address=str(ip_obj),
-            description=description.strip(),
-            severity=severity,
-        )
-        stix_json = result["stix_data"]
-        record_id = save_indicator(
-            ip_address=str(ip_obj),
-            description=description.strip(),
-            severity=severity,
-            stix_data=stix_json,
-            sharing_sector=sharing_sector,
-        )
-        return jsonify({
-            "message": "CTI processed and saved successfully",
-            "record_id": record_id,
-            "ip_address": str(ip_obj),
-            "severity": severity,
-            "sharing_sector": sharing_sector,
-            "stix_data": json.loads(stix_json),
-        }), 201
-    except Exception:
-        app.logger.exception("CTI processing or storage failed")
-        return jsonify({
-            "error": "CTI processing or storage failed"
-        }), 500
-
-# --------------------------------------------------
-
-# 3. Retrieve legacy CTI indicators
-
-# --------------------------------------------------
-@app.route("/api/cti", methods=["GET"])
+@app.route("/api/ai/predict", methods=["GET"])
 @require_auth
-def list_cti():
+def get_ai_prediction():
     try:
-        records = get_all_indicators()
-        for record in records:
-            record["stix_data"] = json.loads(record["stix_data"])
+        result = predict_threat_severity()
+        return jsonify(result), 200
+    except Exception as e:
+        return error_response(f"AI prediction failed: {str(e)}", 500)
+
+@app.route("/api/attack/matrix", methods=["GET"])
+@require_auth
+def get_attack_matrix():
+    try:
+        with get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            orgs = conn.execute("SELECT id, name FROM organizations").fetchall()
+            org_list = [dict(o) for o in orgs]
+
+            rows = conn.execute("""
+                SELECT org.id as org_id, org.name as org_name, rec.indicator_value as technique
+                FROM cti_submissions sub
+                JOIN organizations org ON sub.organization_id = org.id
+                JOIN cti_records rec ON sub.cti_record_id = rec.id
+                WHERE rec.indicator_type = 'attack_technique'
+            """).fetchall()
+
+        org_techniques = {}
+        for row in rows:
+            org_name = row["org_name"]
+            tech = row["technique"]
+            if org_name not in org_techniques:
+                org_techniques[org_name] = set()
+            org_techniques[org_name].add(tech)
+
+        global_techs = {}
+        for techs in org_techniques.values():
+            for t in techs:
+                global_techs[t] = global_techs.get(t, 0) + 1
+
+        suggestions = {}
+        for target_org, target_techs in org_techniques.items():
+            tech_scores = {}
+            
+            for other_org, other_techs in org_techniques.items():
+                if target_org == other_org: continue
+
+                intersection = len(target_techs.intersection(other_techs))
+                union = len(target_techs.union(other_techs))
+                similarity = intersection / union if union > 0 else 0
+
+                if similarity > 0:
+                    unseen_techs = other_techs - target_techs
+                    for tech in unseen_techs:
+                        global_pop = global_techs.get(tech, 1) / len(org_list)
+                        weight = (similarity * 0.7) + (global_pop * 0.3)
+                        tech_scores[tech] = tech_scores.get(tech, 0) + weight
+
+            sorted_suggestions = sorted(tech_scores.items(), key=lambda x: x[1], reverse=True)
+            suggestions[target_org] = [
+                {"tech": tech, "confidence": round(min(score * 100, 99), 1)} 
+                for tech, score in sorted_suggestions[:5]
+            ]
+
         return jsonify({
-            "count": len(records),
-            "indicators": records,
+            "organizations": org_list,
+            "org_techniques": {k: list(v) for k, v in org_techniques.items()},
+            "global_frequency": global_techs,
+            "suggestions": suggestions
         }), 200
+    except Exception as e:
+        app.logger.exception("Failed to build ATT&CK matrix")
+        return error_response(f"Failed to build ATT&CK matrix: {str(e)}", 500)
+
+@app.route("/api/graph/temporal", methods=["GET"])
+@require_auth
+def get_temporal_graph():
+    try:
+        org_id = request.args.get('org_id', type=int)
+        
+        if org_id:
+            with get_connection() as conn:
+                conn.row_factory = sqlite3.Row
+                org = conn.execute("SELECT id, name, sector FROM organizations WHERE id = ?", (org_id,)).fetchone()
+                if not org:
+                    return jsonify({"nodes": [], "links": []}), 200
+                
+                rows = conn.execute("""
+                    SELECT DISTINCT rec.id, rec.indicator_value, rec.indicator_type, rec.category
+                    FROM cti_submissions sub
+                    JOIN cti_records rec ON sub.cti_record_id = rec.id
+                    WHERE sub.organization_id = ?
+                """, (org_id,)).fetchall()
+            
+            nodes = [{"id": f"org_{org['name']}", "label": org["name"], "type": "organization", "sector": org["sector"]}]
+            links = []
+            for row in rows:
+                ioc_id = f"ioc_{row['id']}"
+                nodes.append({
+                    "id": ioc_id, "label": row["indicator_value"],
+                    "type": row["indicator_type"], "category": row["category"]
+                })
+                links.append({"source": f"org_{org['name']}", "target": ioc_id, "type": "submitted"})
+            return jsonify({"nodes": nodes, "links": links}), 200
+
+        return jsonify(build_temporal_graph()), 200
+    except Exception as e:
+        app.logger.exception("Graph failed")
+        return error_response(f"Graph failed: {str(e)}", 500)
+
+@app.route("/api/graph/centrality", methods=["GET"])
+@require_auth
+def get_graph_centrality():
+    try:
+        return jsonify(analyze_graph_centrality()), 200
+    except Exception as e:
+        return error_response(f"Graph analytics failed: {str(e)}", 500)
+
+@app.route("/api/graph/contradictions", methods=["GET"])
+@require_auth
+def get_contradictions():
+    try:
+        conflicts = detect_contradictions()
+        return jsonify({"count": len(conflicts), "contradictions": conflicts}), 200
     except Exception:
-        app.logger.exception("Failed to retrieve CTI")
-        return jsonify({
-            "error": "Failed to retrieve CTI records"
-        }), 500
+        return error_response("Failed to detect contradictions", 500)
 
-# --------------------------------------------------
+@app.route("/api/intelligence/temporal", methods=["GET"])
+@require_auth
+def get_temporal_intelligence():
+    org_id = request.args.get('org_id', type=int)
+    
+    with get_connection() as conn:
+        conn.row_factory = sqlite3.Row
+        query = """
+            SELECT rec.indicator_value, rec.category, sub.observed_at, sub.submitted_severity, 
+                   sub.confidence, org.name as org_name, org.sector as org_sector
+            FROM cti_submissions sub
+            JOIN organizations org ON sub.organization_id = org.id
+            JOIN cti_records rec ON sub.cti_record_id = rec.id
+        """
+        params = []
+        if org_id:
+            query += " WHERE sub.organization_id = ?"
+            params.append(org_id)
+        query += " ORDER BY rec.indicator_value, sub.observed_at ASC"
+        rows = conn.execute(query, params).fetchall()
 
-# 4. Correlate CTI indicators
+    iocs = {}
+    for row in rows:
+        val = row["indicator_value"]
+        if val not in iocs:
+            iocs[val] = {"indicator_value": val, "category": row["category"], "timeline": [], "sectors": set(), "risk_score": 0, "risk_explanation": []}
+        
+        iocs[val]["timeline"].append({
+            "date": row["observed_at"], "severity": row["submitted_severity"],
+            "org": row["org_name"], "sector": row["org_sector"], "confidence": row["confidence"]
+        })
+        if row["org_sector"]: iocs[val]["sectors"].add(row["org_sector"])
 
-# --------------------------------------------------
+    for val, data in iocs.items():
+        score = 0
+        explanations = []
+        severity_map = {"low": 10, "medium": 25, "high": 40, "critical": 50}
+        latest_severity = data["timeline"][-1]["severity"].lower()
+        score += severity_map.get(latest_severity, 10)
+        explanations.append(f"Latest severity ({latest_severity}) contributed {score} pts")
+        
+        vol_score = min(len(data["timeline"]) * 5, 20)
+        score += vol_score
+        explanations.append(f"{len(data['timeline'])} independent reports contributed {vol_score} pts")
+        
+        sec_score = min(len(data["sectors"]) * 10, 20)
+        score += sec_score
+        if sec_score > 0: explanations.append(f"Cross-sector impact contributed {sec_score} pts")
+            
+        score += 10
+        explanations.append("Recent activity contributed 10 pts")
+        
+        raw_score = min(score, 100)
+        data["risk_score"] = calculate_decayed_risk(raw_score, data["timeline"][-1]["date"])
+        if data["risk_score"] < raw_score:
+            explanations.append(f"⚠ Dynamic decay applied ({raw_score} → {data['risk_score']})")
+        data["risk_explanation"] = explanations
+        data["sectors"] = list(data["sectors"])
+
+    return jsonify({"intelligence": list(iocs.values())}), 200
+
+@app.route("/api/export/stix", methods=["GET"])
+@require_auth
+def export_stix_bundle():
+    try:
+        with get_connection() as conn:
+            rows = conn.execute("SELECT stix_data FROM cti_records").fetchall()
+        objects = [{"type": "identity", "spec_version": "2.1", "id": "identity--00000000-0000-0000-0000-000000000001", "created": datetime.now().isoformat() + "Z", "name": "CTI-BTP Platform", "identity_class": "system"}]
+        for row in rows:
+            if row["stix_data"]:
+                try:
+                    parsed = json.loads(row["stix_data"])
+                    objects.extend(parsed.get("objects", []) if parsed.get("type") == "bundle" else [parsed])
+                except Exception: pass
+        return jsonify({"type": "bundle", "id": "bundle--11111111-1111-1111-1111-111111111111", "objects": objects}), 200
+    except Exception as e:
+        return error_response(f"STIX export failed: {str(e)}", 500)
+
+@app.route("/api/cti", methods=["POST", "OPTIONS"])
+def receive_cti():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    if not current_user(): return error_response("Authentication required", 401)
+    data = get_json_object()
+    if data is None: return error_response("Send a valid JSON object")
+    
+    raw_ip = data.get("ip_address")
+    ip_address = defang_and_normalize(raw_ip)
+    try:
+        ip_obj = ipaddress.ip_address(ip_address.strip())
+        if ip_obj.version != 4: return error_response("Only IPv4 addresses are supported")
+    except ValueError: return error_response("Invalid IPv4 address")
+
+    severity = data.get("severity").strip().lower()
+    if severity not in LEGACY_SEVERITIES: return error_response("Severity must be low, medium, high, or critical")
+
+    try:
+        result = process_cti(ip_address=str(ip_obj), description=data.get("description"), severity=severity)
+        record_id = save_indicator(ip_address=str(ip_obj), description=data.get("description"), severity=severity, stix_data=result["stix_data"], sharing_sector=data.get("sharing_sector", "All"))
+        return jsonify({"message": "CTI saved", "record_id": record_id}), 201
+    except Exception: return error_response("CTI processing failed", 500)
+
 @app.route("/api/correlations", methods=["GET"])
 @require_auth
 def list_correlations():
-    try:
-        results = correlate_indicators()
-        return jsonify({
-            "count": len(results),
-            "correlations": results,
-        }), 200
-    except Exception:
-        app.logger.exception("CTI correlation failed")
-        return jsonify({
-            "error": "CTI correlation failed"
-        }), 500
+    try: return jsonify({"count": len(correlate_indicators()), "correlations": correlate_indicators()}), 200
+    except Exception: return error_response("CTI correlation failed", 500)
 
-# --------------------------------------------------
-
-# 5. Calculate legacy CTI risk scores
-
-# --------------------------------------------------
 @app.route("/api/risk", methods=["GET"])
 @require_auth
 def get_risk_analysis():
-    try:
-        results = calculate_risk()
-        return jsonify({
-            "scoring_model": "CTI-BTP prototype scoring v1",
-            "count": len(results),
-            "results": results,
-        }), 200
-    except Exception:
-        app.logger.exception("Risk analysis failed")
-        return jsonify({
-            "error": "Risk analysis failed"
-        }), 500
+    try: return jsonify({"count": len(calculate_risk()), "results": calculate_risk()}), 200
+    except Exception: return error_response("Risk analysis failed", 500)
 
-# --------------------------------------------------
-
-# 6. Register an organization
-
-# --------------------------------------------------
 @app.route("/api/organizations", methods=["POST"])
 def create_organization():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    name = data.get("name")
-    sector = data.get("sector")
-    trust_score = data.get("trust_score", 50)
-    if not isinstance(name, str) or not name.strip():
-        return jsonify({
-            "error": "Organization name is required"
-        }), 400
-    if not isinstance(sector, str) or not sector.strip():
-        return jsonify({
-            "error": "Organization sector is required"
-        }), 400
-    if type(trust_score) is not int or not 0 <= trust_score <= 100:
-        return jsonify({
-            "error": "trust_score must be an integer from 0 to 100"
-        }), 400
+    try: has_organizations = bool(get_all_organizations())
+    except Exception: return error_response("Organization registration failed", 500)
+    if has_organizations and current_user() is None: return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not data.get("name") or not data.get("sector"): return error_response("Name and sector are required")
     try:
-        organization_id = register_organization(
-            name.strip(),
-            sector.strip(),
-            trust_score,
-        )
-        organization = get_organization(organization_id)
-        return jsonify({
-            "message": "Organization registered successfully",
-            "organization": organization,
-        }), 201
-    except sqlite3.IntegrityError:
-        return jsonify({
-            "error": "Organization name already exists"
-        }), 409
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
-    except Exception:
-        app.logger.exception("Organization registration failed")
-        return jsonify({
-            "error": "Organization registration failed"
-        }), 500
+        org_id = register_organization(data["name"].strip(), data["sector"].strip(), data.get("trust_score", 50))
+        return jsonify({"message": "Organization registered", "organization": get_organization(org_id)}), 201
+    except sqlite3.IntegrityError: return error_response("Organization name already exists", 409)
+    except Exception: return error_response("Organization registration failed", 500)
 
-# --------------------------------------------------
-
-# 7. List all organizations
-
-# --------------------------------------------------
 @app.route("/api/organizations", methods=["GET"])
+@require_auth
 def list_organizations():
-    try:
-        organizations = get_all_organizations()
-        return jsonify({
-            "count": len(organizations),
-            "organizations": organizations,
-        }), 200
-    except Exception:
-        app.logger.exception("Organization retrieval failed")
-        return jsonify({
-            "error": "Organization retrieval failed"
-        }), 500
+    try: return jsonify({"count": len(get_all_organizations()), "organizations": get_all_organizations()}), 200
+    except Exception: return error_response("Organization retrieval failed", 500)
 
-# --------------------------------------------------
+@app.route("/api/policies", methods=["GET"])
+@require_auth
+def list_policies():
+    return jsonify({"count": 0, "policies": [], "note": "Evaluated on demand."}), 200
 
-# 8. Retrieve one organization
-
-# --------------------------------------------------
-@app.route("/api/organizations/<int:organization_id>", methods=["GET"])
-def retrieve_organization(organization_id):
-    organization = get_organization(organization_id)
-    if organization is None:
-        return organization_not_found_response(organization_id)
-    return jsonify({"organization": organization}), 200
-
-# --------------------------------------------------
-
-# 9. Update organization name and/or sector
-
-# --------------------------------------------------
-@app.route("/api/organizations/<int:organization_id>", methods=["PUT"])
-def edit_organization(organization_id):
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    allowed_fields = {"name", "sector"}
-    if not data or not set(data).issubset(allowed_fields):
-        return jsonify({
-            "error": "Provide name and/or sector only"
-        }), 400
-    try:
-        updated = update_organization(
-            organization_id,
-            name=data.get("name"),
-            sector=data.get("sector"),
-        )
-        if not updated:
-            return organization_not_found_response(organization_id)
-        return jsonify({
-            "message": "Organization updated successfully",
-            "organization": get_organization(organization_id),
-        }), 200
-    except sqlite3.IntegrityError:
-        return jsonify({
-            "error": "Organization name already exists"
-        }), 409
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
-    except Exception:
-        app.logger.exception("Organization update failed")
-        return jsonify({
-            "error": "Organization update failed"
-        }), 500
-
-# --------------------------------------------------
-
-# 10. Update organization trust score
-
-# --------------------------------------------------
-@app.route(
-    "/api/organizations/<int:organization_id>/trust",
-    methods=["PATCH"],
-)
-def edit_organization_trust(organization_id):
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    trust_score = data.get("trust_score")
-    if type(trust_score) is not int or not 0 <= trust_score <= 100:
-        return jsonify({
-            "error": "trust_score must be an integer from 0 to 100"
-        }), 400
-    try:
-        updated = update_trust_score(organization_id, trust_score)
-        if not updated:
-            return organization_not_found_response(organization_id)
-        return jsonify({
-            "message": "Trust score updated successfully",
-            "organization": get_organization(organization_id),
-        }), 200
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
-    except Exception:
-        app.logger.exception("Trust score update failed")
-        return jsonify({
-            "error": "Trust score update failed"
-        }), 500
-
-# --------------------------------------------------
-
-# 11. Update policy violation count
-
-# --------------------------------------------------
-@app.route(
-    "/api/organizations/<int:organization_id>/violations",
-    methods=["PATCH"],
-)
-def edit_organization_violations(organization_id):
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    policy_violations = data.get("policy_violations")
-    if (
-        type(policy_violations) is not int
-        or policy_violations < 0
-    ):
-        return jsonify({
-            "error": "policy_violations must be a non-negative integer"
-        }), 400
-    try:
-        updated = update_policy_violations(
-            organization_id,
-            policy_violations,
-        )
-        if not updated:
-            return organization_not_found_response(organization_id)
-        return jsonify({
-            "message": "Policy violations updated successfully",
-            "organization": get_organization(organization_id),
-        }), 200
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
-    except Exception:
-        app.logger.exception("Policy violation update failed")
-        return jsonify({
-            "error": "Policy violation update failed"
-        }), 500
-
-# --------------------------------------------------
-
-# 12. Activate or deactivate an organization
-
-# --------------------------------------------------
-@app.route(
-    "/api/organizations/<int:organization_id>/status",
-    methods=["PATCH"],
-)
-def edit_organization_status(organization_id):
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    is_active = data.get("is_active")
-    if type(is_active) is not bool:
-        return jsonify({
-            "error": "is_active must be true or false"
-        }), 400
-    try:
-        updated = set_organization_status(
-            organization_id,
-            is_active,
-        )
-        if not updated:
-            return organization_not_found_response(organization_id)
-        return jsonify({
-            "message": "Organization status updated successfully",
-            "organization": get_organization(organization_id),
-        }), 200
-    except ValueError as error:
-        return jsonify({"error": str(error)}), 400
-    except Exception:
-        app.logger.exception("Organization status update failed")
-        return jsonify({
-            "error": "Organization status update failed"
-        }), 500
-
-# --------------------------------------------------
-
-# 13. Evaluate access to a legacy CTI indicator
-
-# --------------------------------------------------
-@app.route("/api/policies", methods=["POST"])
+@app.route("/api/policies", methods=["POST", "OPTIONS"])
 def evaluate_policy():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    organization_id = data.get("organization_id")
-    indicator_id = data.get("indicator_id")
-    if not valid_positive_id(organization_id):
-        return jsonify({
-            "error": "organization_id must be a positive integer"
-        }), 400
-    if not valid_positive_id(indicator_id):
-        return jsonify({
-            "error": "indicator_id must be a positive integer"
-        }), 400
+    if request.method == "OPTIONS": return jsonify({}), 200
+    if not current_user(): return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not valid_positive_id(data.get("organization_id")) or not valid_positive_id(data.get("indicator_id")):
+        return error_response("organization_id and indicator_id must be positive integers")
     try:
-        result = generate_access_policy(
-            organization_id,
-            indicator_id,
-        )
-        if result.get("reason") in [
-            "Organization not found",
-            "CTI indicator not found",
-            "Risk assessment not available",
-        ]:
-            return jsonify(result), 404
-        return jsonify(result), 200
-    except Exception:
-        app.logger.exception("Access policy evaluation failed")
-        return jsonify({
-            "error": "Access policy evaluation failed"
-        }), 500
+        result = generate_access_policy(data["organization_id"], data["indicator_id"])
+        return jsonify(result), 404 if result.get("reason") in ("Organization not found", "CTI indicator not found", "Risk assessment not available") else 200
+    except Exception: return error_response("Access policy evaluation failed", 500)
 
-# --------------------------------------------------
-
-# 14. Evaluate access to an advanced CTI record
-
-# --------------------------------------------------
-@app.route("/api/advanced-policies", methods=["POST"])
+@app.route("/api/advanced-policies", methods=["POST", "OPTIONS"])
 def advanced_access_policy():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    organization_id = data.get("organization_id")
-    record_id = data.get("record_id")
-    if not valid_positive_id(organization_id):
-        return jsonify({
-            "error": "organization_id must be a positive integer"
-        }), 400
-    if not valid_positive_id(record_id):
-        return jsonify({
-            "error": "record_id must be a positive integer"
-        }), 400
+    if request.method == "OPTIONS": return jsonify({}), 200
+    if not current_user(): return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not valid_positive_id(data.get("organization_id")) or not valid_positive_id(data.get("record_id")):
+        return error_response("organization_id and record_id must be positive integers")
     try:
-        result = generate_advanced_access_policy(
-            organization_id,
-            record_id,
-        )
-        if result.get("reason") in [
-            "Organization not found",
-            "Advanced CTI record not found",
-        ]:
-            return jsonify(result), 404
-        return jsonify(result), 200
-    except Exception:
-        app.logger.exception(
-            "Advanced CTI access policy evaluation failed"
-        )
-        return jsonify({
-            "error": "Advanced CTI access policy evaluation failed"
-        }), 500
+        result = generate_advanced_access_policy(data["organization_id"], data["record_id"])
+        try:
+            with get_connection() as conn:
+                org = conn.execute("SELECT name FROM organizations WHERE id = ?", (data["organization_id"],)).fetchone()
+                rec = conn.execute("SELECT indicator_value FROM cti_records WHERE id = ?", (data["record_id"],)).fetchone()
+                is_granted = result.get("decision") in ["allow", "granted"] or result.get("allowed") == True
+                conn.execute("INSERT INTO audit_logs (organization_name, record_value, decision, reason, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    (org["name"] if org else "Unknown", rec["indicator_value"] if rec else "Unknown", "GRANTED" if is_granted else "DENIED", result.get("reason", ""), datetime.now().isoformat()))
+                conn.commit()
+        except Exception: pass
+        return jsonify(result), 404 if result.get("reason") in ("Organization not found", "Advanced CTI record not found") else 200
+    except Exception: return error_response("Advanced CTI access policy evaluation failed", 500)
 
-# --------------------------------------------------
+@app.route("/api/audit-logs", methods=["GET"])
+@require_auth
+def get_audit_logs():
+    try:
+        with get_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM audit_logs ORDER BY id DESC LIMIT 50").fetchall()
+            return jsonify([dict(r) for r in rows]), 200
+    except Exception as e: return error_response(f"Failed to fetch audit logs: {str(e)}", 500)
 
-# 15. Authentication APIs
-
-# --------------------------------------------------
 @app.route("/api/auth/register", methods=["POST"])
 def auth_register():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
+    data = get_json_object()
+    if data is None: return error_response("Send a valid JSON object")
+    limiter_key = f"register|{request.remote_addr}"
+    if register_limiter.retry_after(limiter_key): return too_many_requests(register_limiter.retry_after(limiter_key))
+    register_limiter.record(limiter_key)
     try:
-        user = register_user(
-            name=data.get("name"),
-            email=data.get("email"),
-            password=data.get("password"),
-            organization_id=data.get("organization_id"),
-        )
-        return jsonify({
-            "message": "Registration successful",
-            "user": user,
-        }), 201
-    except ValueError as error:
-        message = str(error)
-        if "already exists" in message.lower():
-            return jsonify({"error": message}), 409
-        return jsonify({"error": message}), 400
-    except sqlite3.IntegrityError:
-        return jsonify({
-            "error": "Email or organization constraint failed"
-        }), 409
-    except Exception:
-        app.logger.exception("User registration failed")
-        return jsonify({"error": "Registration failed"}), 500
+        user = register_user(name=data.get("name"), email=clean_email(data.get("email")), password=data.get("password"), organization_id=data.get("organization_id"))
+        return jsonify({"message": "Registration successful", "user": public_user(user)}), 201
+    except ValueError as error: return error_response(str(error), 400)
+    except Exception: return error_response("Registration failed", 500)
+
 @app.route("/api/auth/login", methods=["POST"])
 def auth_login():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "Send a valid JSON object"}), 400
-    email = data.get("email")
-    password = data.get("password")
-    if not isinstance(email, str) or not isinstance(password, str):
-        return jsonify({
-            "error": "Email and password are required"
-        }), 400
+    data = get_json_object()
+    if not data or not data.get("email") or not data.get("password"): return error_response("Email and password are required")
+    email = clean_email(data.get("email"))
+    limiter_key = f"login|{request.remote_addr}|{email}"
+    if login_limiter.retry_after(limiter_key): return too_many_requests(login_limiter.retry_after(limiter_key))
     try:
-        user = authenticate_user(email, password)
+        user = authenticate_user(email, data.get("password"))
         if user is None:
-            return jsonify({
-                "error": "Invalid credentials or inactive account"
-            }), 401
-        token = create_access_token(user["id"])
-        return jsonify({
-            "message": "Login successful",
-            "access_token": token,
-            "token_type": "Bearer",
-            "expires_in": 3600,
-            "user": user,
-        }), 200
-    except Exception:
-        app.logger.exception("Login failed")
-        return jsonify({"error": "Login failed"}), 500
-@app.route("/api/auth/me", methods=["GET"])
-def auth_me():
-    authorization = request.headers.get("Authorization", "")
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return jsonify({
-            "error": "Provide a Bearer access token"
-        }), 401
-    try:
-        user = verify_access_token(parts[1])
-        if user is None:
-            return jsonify({
-                "error": "Invalid, expired, or inactive token"
-            }), 401
-        return jsonify({"user": user}), 200
-    except Exception:
-        app.logger.exception("Token verification failed")
-        return jsonify({
-            "error": "Token verification failed"
-        }), 500
+            login_limiter.record(limiter_key)
+            return error_response("Invalid credentials", 401)
+        login_limiter.clear(limiter_key)
+        return jsonify({"message": "Login successful", "access_token": create_access_token(user["id"]), "token_type": "Bearer", "user": public_user(user)}), 200
+    except Exception: return error_response("Login failed", 500)
 
-# --------------------------------------------------
+@app.route("/api/crypto/encrypt", methods=["POST", "OPTIONS"])
+def crypto_encrypt():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    if not current_user(): return error_response("Authentication required", 401)
+    data = get_json_object()
+    return jsonify({"ciphertext": encrypt_payload(data.get("record"), data.get("policy", {}))}), 200
 
-# Advanced CTI routes
+@app.route("/api/crypto/decrypt", methods=["POST", "OPTIONS"])
+def crypto_decrypt():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    if not current_user(): return error_response("Authentication required", 401)
+    data = get_json_object()
+    result = decrypt_payload(data.get("ciphertext"), data.get("user_attributes"))
+    return jsonify(result), 200 if result["success"] else 403
 
-# Registered through advanced_cti_bp.
+@app.route("/api/crypto/revoke", methods=["POST", "OPTIONS"])
+def crypto_revoke():
+    if request.method == "OPTIONS": return jsonify({}), 200
+    if not current_user(): return error_response("Authentication required", 401)
+    data = get_json_object()
+    if data.get("action") == "restore": restore_access(data.get("organization_id"))
+    else: revoke_access(data.get("organization_id"))
+    return jsonify({"message": "Action successful"}), 200
 
-#
-
-# POST /api/cti/submit
-
-# GET  /api/cti/advanced
-
-# GET  /api/cti/advanced/<record_id>/submissions
-
-# --------------------------------------------------
-
-# --------------------------------------------------
-
-# Start Flask
-
-# --------------------------------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "5000")), debug=os.environ.get("FLASK_DEBUG", "1") == "1")

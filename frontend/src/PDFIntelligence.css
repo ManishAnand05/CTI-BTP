@@ -1,0 +1,417 @@
+/* ==========================================================================
+   PDF Intelligence – Aurora Threat Console
+   Every class below is used by PDFIntelligence.jsx (no unstyled leftovers).
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+.pdf-page {
+  --bg: #060a16;
+  --bg-2: #0a1020;
+  --surface: rgba(16, 24, 46, 0.62);
+  --surface-solid: #0f1830;
+  --surface-hi: #162144;
+  --line: rgba(120, 150, 255, 0.14);
+  --line-hi: rgba(120, 220, 255, 0.4);
+
+  --text: #eaf0ff;
+  --text-2: #9fb0d3;
+  --text-3: #62739a;
+
+  --cyan: #22e3ff;
+  --blue: #4c8dff;
+  --violet: #9b6bff;
+  --pink: #ff4fa3;
+  --red: #ff4d6d;
+  --amber: #ffb547;
+  --green: #35f2a0;
+
+  --grad-brand: linear-gradient(120deg, #22e3ff 0%, #4c8dff 45%, #9b6bff 100%);
+  --grad-danger: linear-gradient(120deg, #ff4d6d, #ff9a5a);
+
+  --font-sans: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --radius: 16px;
+
+  position: relative;
+  min-height: 100vh;
+  padding: clamp(20px, 4vw, 48px);
+  box-sizing: border-box;
+  color: var(--text);
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(900px 500px at 8% -10%, rgba(34, 227, 255, 0.16), transparent 60%),
+    radial-gradient(800px 520px at 100% 0%, rgba(155, 107, 255, 0.18), transparent 55%),
+    radial-gradient(700px 500px at 50% 110%, rgba(76, 141, 255, 0.12), transparent 60%),
+    var(--bg);
+  overflow-x: hidden;
+}
+
+/* faint dotted grid */
+.pdf-page::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(rgba(140, 170, 255, 0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse at 50% 20%, #000 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 20%, #000 20%, transparent 75%);
+  pointer-events: none;
+}
+
+.pdf-page > * { position: relative; }
+.pdf-page *, .pdf-page *::before, .pdf-page *::after { box-sizing: border-box; }
+
+/* ---------- Header ---------- */
+.page-head { max-width: 1200px; margin: 0 auto 32px; }
+.page-head h2 {
+  margin: 0 0 10px;
+  font-size: clamp(32px, 5vw, 52px);
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  background: var(--grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.section-desc { margin: 0; color: var(--text-2); font-size: 16px; line-height: 1.6; max-width: 62ch; }
+
+.shell { max-width: 1200px; margin: 0 auto; }
+
+/* ---------- Glass panel ---------- */
+.panel {
+  background: var(--surface);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: clamp(20px, 3vw, 32px);
+  margin-bottom: 24px;
+  box-shadow: 0 20px 60px -30px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.panel-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.panel h3 { margin: 0 0 6px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+
+/* ---------- Upload zone ---------- */
+.upload-zone {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 56px 24px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: var(--radius);
+  border: 1.5px dashed rgba(34, 227, 255, 0.35);
+  background:
+    radial-gradient(500px 200px at 50% 0%, rgba(34, 227, 255, 0.08), transparent 70%),
+    rgba(10, 16, 32, 0.5);
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+.upload-zone:hover, .upload-zone.dragging, .upload-zone:focus-within {
+  border-color: var(--cyan);
+  background:
+    radial-gradient(500px 220px at 50% 0%, rgba(34, 227, 255, 0.16), transparent 70%),
+    rgba(10, 16, 32, 0.6);
+}
+.upload-zone.dragging { transform: scale(1.01); }
+.upload-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.upload-icon {
+  width: 72px; height: 72px; display: grid; place-items: center;
+  font-size: 32px; border-radius: 20px;
+  background: var(--grad-brand);
+  box-shadow: 0 10px 40px -8px rgba(76, 141, 255, 0.7);
+}
+.upload-text { font-size: 20px; font-weight: 600; }
+.upload-hint { color: var(--text-2); font-size: 14px; }
+
+.file-chip {
+  display: inline-flex; align-items: center; gap: 10px;
+  margin: 20px 0 0; padding: 10px 14px;
+  border: 1px solid var(--line-hi); border-radius: 999px;
+  background: rgba(34, 227, 255, 0.07);
+  font-size: 14px; color: var(--text-2);
+}
+.file-chip strong { color: var(--text); font-weight: 600; }
+.upload-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 20px; }
+.form-error {
+  margin-top: 16px; padding: 12px 16px; border-radius: 12px;
+  background: rgba(255, 77, 109, 0.1); border: 1px solid rgba(255, 77, 109, 0.4);
+  color: #ff9db0; font-size: 14px;
+}
+
+/* ---------- Buttons ---------- */
+.button-primary, .button-secondary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 12px 22px;
+  font-family: var(--font-sans); font-size: 15px; font-weight: 600;
+  border-radius: 12px; cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.2s, background 0.2s, border-color 0.2s;
+}
+.button-primary {
+  border: 0; color: #04101f; background: var(--grad-brand);
+  box-shadow: 0 10px 30px -10px rgba(76, 141, 255, 0.8);
+}
+.button-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 14px 34px -8px rgba(34, 227, 255, 0.7); }
+.button-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.button-secondary { color: var(--text); background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line-hi); }
+.button-secondary:hover { background: rgba(34, 227, 255, 0.1); border-color: var(--cyan); }
+.pdf-page button:focus-visible, .pdf-page select:focus-visible, .pdf-page input:focus-visible, .pdf-page textarea:focus-visible {
+  outline: 2px solid var(--cyan); outline-offset: 2px;
+}
+
+.spinner {
+  width: 16px; height: 16px; border-radius: 50%;
+  border: 2px solid rgba(4, 16, 31, 0.3); border-top-color: #04101f;
+  animation: spin 0.7s linear infinite;
+}
+
+/* ---------- Threat overview (hero) ---------- */
+.overview {
+  display: grid; grid-template-columns: auto 1fr; gap: clamp(20px, 4vw, 48px);
+  align-items: center;
+  padding: clamp(24px, 4vw, 40px);
+  border-radius: 22px; margin-bottom: 24px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(600px 300px at 0% 50%, var(--glow, rgba(34, 227, 255, 0.14)), transparent 70%),
+    var(--surface);
+  backdrop-filter: blur(18px);
+}
+.overview.critical { --glow: rgba(255, 77, 109, 0.2); border-color: rgba(255, 77, 109, 0.35); }
+.overview.elevated { --glow: rgba(255, 181, 71, 0.16); border-color: rgba(255, 181, 71, 0.3); }
+.overview.low { --glow: rgba(53, 242, 160, 0.14); border-color: rgba(53, 242, 160, 0.3); }
+
+.gauge { position: relative; width: 168px; height: 168px; flex-shrink: 0; }
+.gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.gauge-track { fill: none; stroke: rgba(255, 255, 255, 0.07); stroke-width: 10; }
+.gauge-fill {
+  fill: none; stroke-width: 10; stroke-linecap: round;
+  stroke-dasharray: 339.29; stroke-dashoffset: 339.29;
+  animation: gauge-in 1.2s cubic-bezier(.2, .8, .2, 1) forwards;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+.critical .gauge-fill { stroke: var(--red); color: var(--red); }
+.elevated .gauge-fill { stroke: var(--amber); color: var(--amber); }
+.low .gauge-fill { stroke: var(--green); color: var(--green); }
+.gauge-center { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
+.gauge-score { font-size: 46px; font-weight: 700; line-height: 1; letter-spacing: -0.04em; }
+.gauge-caption { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+
+.overview-body { min-width: 0; }
+.threat-level { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; font-size: clamp(24px, 3.4vw, 34px); font-weight: 700; letter-spacing: -0.02em; }
+.level-pill {
+  padding: 4px 12px; border-radius: 999px; font-size: 14px; font-weight: 600; letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.08);
+}
+.critical .level-pill { background: rgba(255, 77, 109, 0.18); color: #ff9db0; }
+.elevated .level-pill { background: rgba(255, 181, 71, 0.18); color: #ffd08a; }
+.low .level-pill { background: rgba(53, 242, 160, 0.16); color: #8ff7c8; }
+.overview-sub { color: var(--text-2); font-size: 15px; margin: 0 0 20px; }
+.threat-meta { display: flex; flex-wrap: wrap; gap: 8px 24px; font-family: var(--font-mono); font-size: 12px; color: var(--text-3); }
+.threat-meta span { word-break: break-all; }
+.threat-meta b { color: var(--text-2); font-weight: 600; }
+
+.mix-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; margin: 0 0 12px; background: rgba(255, 255, 255, 0.05); }
+.mix-seg { height: 100%; min-width: 4px; }
+.mix-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-bottom: 20px; font-size: 13px; color: var(--text-2); }
+.mix-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 7px; }
+
+/* type colors (shared by bar, badges) */
+.t-cve { --c: var(--red); }
+.t-attack_technique { --c: var(--violet); }
+.t-md5, .t-sha1, .t-sha256 { --c: var(--amber); }
+.t-domain, .t-url { --c: var(--cyan); }
+.t-ip { --c: var(--blue); }
+.t-other { --c: var(--text-3); }
+.mix-seg, .mix-legend i { background: var(--c, var(--text-3)); }
+
+/* ---------- KPI cards ---------- */
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.kpi-card {
+  position: relative; overflow: hidden;
+  padding: 22px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+}
+.kpi-card::after {
+  content: ''; position: absolute; right: -40px; top: -40px; width: 120px; height: 120px; border-radius: 50%;
+  background: var(--kpi, var(--cyan)); opacity: 0.16; filter: blur(30px);
+}
+.kpi-card.accent { --kpi: var(--violet); }
+.kpi-card.danger { --kpi: var(--red); }
+.kpi-card.warning { --kpi: var(--amber); }
+.kpi-label { color: var(--text-2); font-size: 14px; margin-bottom: 14px; }
+.kpi-value { font-size: 44px; font-weight: 700; line-height: 1; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.kpi-card.accent .kpi-value { color: #c4a6ff; }
+.kpi-card.danger .kpi-value { color: #ff8aa0; }
+.kpi-card.warning .kpi-value { color: #ffd08a; }
+
+/* ---------- ATT&CK ---------- */
+.attack-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.attack-card {
+  padding: 18px; border-radius: 14px;
+  background: linear-gradient(160deg, rgba(155, 107, 255, 0.12), rgba(15, 24, 48, 0.6) 55%);
+  border: 1px solid rgba(155, 107, 255, 0.25);
+  transition: border-color 0.2s, transform 0.2s;
+}
+.attack-card:hover { border-color: rgba(155, 107, 255, 0.7); transform: translateY(-2px); }
+.attack-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 12px; }
+.attack-id { font-family: var(--font-mono); font-size: 18px; font-weight: 600; color: #c4a6ff; }
+.attack-pages { font-size: 12px; color: var(--text-2); padding: 3px 10px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); white-space: nowrap; }
+.attack-evidence { font-size: 13px; line-height: 1.65; color: var(--text-2); max-height: 260px; overflow-y: auto; }
+.attack-evidence p { margin: 0; padding: 8px 0; border-top: 1px solid rgba(155, 107, 255, 0.18); }
+.attack-evidence p:first-child { border-top: 0; padding-top: 0; }
+.attack-evidence strong { color: var(--text); font-weight: 600; }
+
+/* ---------- Filters ---------- */
+.filter-bar { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.filter-bar select, .filter-bar input,
+.field input, .field textarea {
+  background: rgba(8, 13, 28, 0.7); border: 1px solid var(--line); color: var(--text);
+  padding: 12px 14px; border-radius: 12px; font-family: var(--font-sans); font-size: 14px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.filter-bar select { min-width: 170px; cursor: pointer; }
+.filter-bar input { flex: 1; min-width: 220px; }
+.filter-bar select:focus, .filter-bar input:focus, .field input:focus, .field textarea:focus {
+  outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34, 227, 255, 0.15);
+}
+::placeholder { color: var(--text-3); }
+.result-count { margin: 0 0 12px; color: var(--text-3); font-size: 13px; }
+
+/* ---------- Table ---------- */
+.table-container { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: rgba(8, 13, 28, 0.55); }
+.data-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; min-width: 760px; }
+.data-table th {
+  position: sticky; top: 0; padding: 14px 18px;
+  font-size: 12px; font-weight: 600; color: var(--text-3); letter-spacing: 0.04em;
+  background: #0b1327; border-bottom: 1px solid var(--line);
+}
+.data-table td { padding: 16px 18px; border-bottom: 1px solid rgba(120, 150, 255, 0.08); vertical-align: top; }
+.data-table tbody tr { transition: background 0.15s; }
+.data-table tbody tr:hover { background: rgba(34, 227, 255, 0.04); }
+.data-table tbody tr:last-child td { border-bottom: 0; }
+
+.indicator-row { display: flex; align-items: flex-start; gap: 10px; }
+.indicator-val { font-family: var(--font-mono); font-size: 13px; color: var(--cyan); word-break: break-all; line-height: 1.5; }
+
+.copy-btn {
+  flex-shrink: 0; padding: 3px 10px; border-radius: 8px; cursor: pointer;
+  font-family: var(--font-sans); font-size: 12px; font-weight: 500;
+  color: var(--text-2); background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line);
+  transition: all 0.15s;
+}
+.copy-btn:hover { color: var(--cyan); border-color: var(--cyan); }
+.copy-btn.done { color: var(--green); border-color: var(--green); }
+
+.context-box { padding: 10px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.04); border-left: 2px solid var(--cyan); font-size: 13px; color: var(--text-2); line-height: 1.55; }
+.context-row + .context-row { margin-top: 4px; }
+.context-label { color: var(--text-3); margin-right: 4px; }
+.context-warn { margin-top: 8px; color: var(--amber); font-weight: 600; font-size: 12px; }
+.evidence-cell { font-size: 13px; color: var(--text-2); line-height: 1.65; }
+.evidence-cell div + div { margin-top: 8px; }
+.evidence-page { font-weight: 600; color: var(--text); margin-right: 4px; }
+.muted { color: var(--text-3); }
+.empty { padding: 56px 24px; text-align: center; color: var(--text-3); }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-block; padding: 4px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: var(--c, var(--text-2));
+  background: color-mix(in srgb, var(--c, #888) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c, #888) 40%, transparent);
+}
+.badge-warning { --c: var(--amber); margin-top: 8px; }
+
+/* ---------- Report form ---------- */
+.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field.wide { grid-column: 1 / -1; }
+.field label { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.field textarea { resize: vertical; min-height: 88px; line-height: 1.55; }
+
+/* ---------- Printable report ---------- */
+.report-sheet {
+  max-width: 900px; margin: 0 auto 24px; padding: clamp(28px, 5vw, 56px);
+  background: #fff; color: #111827; border-radius: 6px;
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.9);
+  font-family: var(--font-sans);
+}
+.report-sheet .report-top { border-top: 6px solid #2563eb; padding-top: 20px; margin-bottom: 28px; }
+.report-sheet h2 { margin: 0 0 8px; font-size: 32px; letter-spacing: -0.02em; color: #0b1220; }
+.report-sheet h3 { margin: 28px 0 10px; font-size: 17px; color: #0b1220; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }
+.report-sheet p { line-height: 1.7; margin: 0 0 12px; color: #1f2937; }
+.report-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 24px; padding: 16px; background: #f3f4f6; border-radius: 8px; margin-bottom: 8px; font-size: 13px; }
+.report-meta b { display: block; color: #6b7280; font-weight: 500; font-size: 12px; margin-bottom: 2px; }
+.report-level { display: inline-block; padding: 2px 10px; border-radius: 999px; font-weight: 700; font-size: 13px; color: #fff; background: #16a34a; }
+.report-level.critical { background: #dc2626; }
+.report-level.elevated { background: #d97706; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.report-table th { text-align: left; padding: 8px; background: #f3f4f6; border-bottom: 1px solid #d1d5db; }
+.report-table td { padding: 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+.report-table code { font-family: var(--font-mono); font-weight: 600; }
+.report-sheet .button-primary { margin-top: 24px; }
+
+/* ---------- Animation ---------- */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes gauge-in { to { stroke-dashoffset: var(--offset); } }
+
+/* ---------- Responsive ---------- */
+@media (max-width: 720px) {
+  .overview { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+  .threat-level, .threat-meta, .mix-legend { justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gauge-fill { animation: none; stroke-dashoffset: var(--offset); }
+  .pdf-page * { transition: none !important; }
+}
+
+/* ---------- Print: only the report ---------- */
+@media print {
+  .pdf-page { background: #fff !important; padding: 0; }
+  .pdf-page::before { display: none; }
+  .pdf-page .no-print, .page-head, .overview, .kpi-grid, .panel { display: none !important; }
+  .report-sheet { box-shadow: none; margin: 0; max-width: none; padding: 0; }
+}
+
+.field-grid.single { grid-template-columns: minmax(240px, 480px); }
+
+/* ==========================================================================
+   Overrides: beat global/app styles (white rows, white buttons, white headers)
+   ========================================================================== */
+.pdf-page .data-table,
+.pdf-page .data-table tbody,
+.pdf-page .data-table tr { background: transparent !important; color: var(--text) !important; }
+.pdf-page .data-table thead th {
+  background: #0b1327 !important; color: var(--text-3) !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+.pdf-page .data-table td {
+  background: transparent !important; color: var(--text-2) !important;
+  border-bottom: 1px solid rgba(120,150,255,.08) !important;
+}
+.pdf-page .data-table tbody tr:hover,
+.pdf-page .data-table tbody tr:hover td,
+.pdf-page .data-table tbody tr:nth-child(even),
+.pdf-page .data-table tbody tr:nth-child(even) td { background: rgba(34,227,255,.05) !important; color: var(--text-2) !important; }
+.pdf-page .data-table tbody tr:nth-child(odd):not(:hover),
+.pdf-page .data-table tbody tr:nth-child(odd):not(:hover) td { background: transparent !important; }
+.pdf-page .data-table .indicator-val { color: var(--cyan) !important; }
+.pdf-page .data-table .evidence-page { color: var(--text) !important; }
+.pdf-page .data-table .badge {
+  color: var(--c, var(--text-2)) !important;
+  background: color-mix(in srgb, var(--c, #888) 15%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--c, #888) 40%, transparent) !important;
+}
+.pdf-page .copy-btn { background: rgba(255,255,255,.05) !important; color: var(--text-2) !important; border: 1px solid var(--line) !important; }
+.pdf-page .copy-btn:hover { color: var(--cyan) !important; border-color: var(--cyan) !important; }
+.pdf-page .copy-btn.done { color: var(--green) !important; border-color: var(--green) !important; }
+.pdf-page .table-container { background: rgba(8,13,28,.55) !important; }
+.pdf-page .button-secondary {
+  background: rgba(255,255,255,.05) !important; color: var(--text) !important;
+  border: 1px solid var(--line-hi) !important;
+}
+.pdf-page .button-secondary:hover { background: rgba(34,227,255,.12) !important; border-color: var(--cyan) !important; }
+.pdf-page .button-primary { background: var(--grad-brand) !important; color: #04101f !important; border: 0 !important; }
+.pdf-page .panel { color: var(--text); }

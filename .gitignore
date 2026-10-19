@@ -7,10 +7,11 @@ __pycache__/
 !.env.example
 node_modules/
 frontend/dist/
-data/*.db
-data/*.sqlite
-data/*.sqlite3
+# Local CTI databases and backups
+data/
 frontend-backup-*/
 *.log
 
 policy_engine_copy.txt
+# Visual Studio workspace files
+.vs/
