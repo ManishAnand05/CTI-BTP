@@ -1,232 +1,219 @@
-# Cyber Threat Intelligence (CTI) Sharing Platform
+# Extending PR-RABE for Risk-Adaptive and Secure Cross-Organizational CTI Sharing
 
-## 1. Project Overview
-The Cyber Threat Intelligence (CTI) Sharing Platform is an advanced, full-stack web application designed to help organizations process, analyze, correlate, and securely share cyber threat intelligence. 
+**B.Tech Project (BTP) — Phase I**
+Department of CSE — Cyber Security, Indian Institute of Information Technology Kottayam
 
-Different organizations encounter different cyber threats. Sharing relevant intelligence helps them identify related attacks, understand potential risks, and make better security decisions. This project moves beyond basic rule-based matching to incorporate **Machine Learning risk prediction**, **Graph Theory (PageRank)**, **Temporal Risk Decay**, and **Attribute-Based Encryption (ABE)** for privacy-preserving sharing.
+| Team | Roll Number |
+|------|-------------|
+| Manasa Manoj | 2023BCY0041 |
+| Manish Anand | 2023BCY0053 |
+| Jadhav Sai | 2023BCY0064 |
+| Bhaskar Naik | 2023BCY0031 |
 
-## 2. Core Objectives (Completed)
-- **Automated Ingestion:** Extract indicators (IPs, Hashes, CVEs, ATT&CK techniques) from unstructured PDF threat reports.
-- **Knowledge Graph Construction:** Build a Temporal Knowledge Graph connecting Organizations to Threat Actors.
-- **AI Risk Prediction:** Use Machine Learning to predict the severity of incoming threats and mathematically decay the risk of outdated intelligence.
-- **Privacy-Preserving Sharing:** Implement Attribute-Based Encryption (ABE) and key revocation to ensure only authorized sectors can decrypt shared data.
-- **Adaptive Access Control:** Evaluate sharing policies dynamically based on organization trust, sector, and threat risk, with persistent audit logging.
-- **Advanced UI/UX:** Provide a dark-mode, interactive dashboard with an ATT&CK Heatmap and Collaborative Filtering predictions.
-
----
-
-## 3. Advanced Features (Implemented)
-
-### 🛡️ Member 1: Ingestion, Normalization & Graph Intelligence
-- **PDF Extraction Engine:** Extracts IPs, Domains, Hashes (MD5, SHA1, SHA256), CVEs, and MITRE ATT&CK IDs directly from PDFs.
-- **Defang & Normalization:** Automatically cleans dirty data (e.g., converting `hxxp://198[.]51[.]100[.]77` to `http://198.51.100.77`).
-- **STIX 2.1 Export:** Exports the entire SQLite database as a valid, industry-standard STIX 2.1 JSON bundle.
-- **Temporal Knowledge Graph:** Visualizes relationships between Organizations and IOCs using `react-force-graph-2d`.
-- **PageRank Centrality:** Mathematically ranks the most "dangerous" or influential nodes in the network.
-
-### 🧠 Member 2: AI Prediction & Temporal Risk
-- **AI Threat Prediction:** A pure-Python Machine Learning model (Weighted Naive Bayes logic) that predicts the next likely threat severity based on trust scores, source reliability, and report volume.
-- **Dynamic Risk Decay:** Exponential decay formula that automatically lowers the risk score of IOCs as they become older.
-- **Explainable Risk Scoring:** Breaks down the risk score into understandable points (Severity + Volume + Cross-sector impact + Recency).
-- **ATT&CK Heatmap & Collaborative Filtering:** A dark-mode matrix showing tactic coverage, with an AI engine that predicts unseen techniques for an organization based on what *other* similar organizations are seeing.
-
-### 🔒 Member 3: Privacy-Preserving Cryptography
-- **Attribute-Based Encryption (PR-RABE):** Pure-Python cryptographic engine that derives keys based on organizational attributes (e.g., Finance sector). 
-- **Revocation:** Allows admins to instantly revoke an organization's keys, preventing decryption of future intelligence.
-- **Tamper-Proof:** Data cannot be decrypted by organizations that do not match the attribute policy.
-
-### 🚦 Member 4: Adaptive Access Control & Auditing
-- **Policy Decision Engine:** Evaluates access requests based on Organization Trust Score, Historical Violations, and Threat Risk.
-- **Persistent Audit Logs:** Every access request (Granted or Denied) is permanently written to a SQLite `audit_logs` table for compliance.
-- **Per-Organization Workspace:** A two-tier UI where analysts can view a global dashboard or drill down into a specific organization's isolated workspace.
+**Guide:** Dr. A Balu
 
 ---
 
-## 4. System Architecture
-The platform consists of the following major components:
-- **Frontend:** React + Vite. Features advanced data grids, force-directed graphs, and a cyber-command dark-mode theme.
-- **Backend API:** Flask (Python). Coordinates all modules and handles REST API requests.
-- **AI & Graph Modules:** Pure Python implementations of PageRank, Naive Bayes classification, and dynamic decay math.
-- **Crypto Engine:** Custom XOR/PBKDF2-based Attribute-Based Encryption simulation.
-- **Database:** SQLite. Stores records, submissions, organizations, users, and persistent audit logs.
+## Overview
 
-### Data Flow
-1. A user uploads a PDF or submits CTI data.
-2. Member 1's ingestion engine normalizes the data and saves it to the database.
-3. Member 2's AI engine scans the database to predict future threats and applies decay to older IOCs.
-4. Member 4's Policy Engine evaluates if a requesting organization is allowed to see the data.
-5. Member 3's Crypto Engine encrypts the payload based on sector attributes.
-6. The React frontend visualizes the graph, heatmap, and timelines.
+A full-stack web platform for **privacy-preserving cyber threat intelligence (CTI) sharing** that extends the PR-RABE (Privacy-preserving Revocable Registered Attribute-Based Encryption) scheme with a **risk-adaptive layer**.
 
----
+The core contribution is an event-driven risk/trust engine that **automatically drives PR-RABE's AGK (Attribute Group Key) revocation** — unlike the base scheme where revocation is manual. Organizations' decryption eligibility changes dynamically as their behavioral trust evolves, without re-encrypting existing ciphertexts.
 
-## 5. Technologies Used
+### Key Features
 
-| Component | Technology |
-| :--- | :--- |
-| **Frontend** | React, Vite, React-Force-Graph-2D, Lucide Icons |
-| **Backend** | Python, Flask, Flask-CORS |
-| **Database** | SQLite 3 |
-| **Threat Format** | STIX 2.1 (JSON) |
-| **AI / Math** | Pure Python (Jaccard Similarity, Exponential Decay, PageRank) |
-| **Cryptography** | Hashlib, OS (PBKDF2-style Key Derivation) |
+- **PR-RABE Encryption Pipeline** — KEM-DEM hybrid: AES-256-GCM authenticated encryption with HKDF-SHA256 key derivation, LSSS policy strings auto-generated from record sensitivity
+- **Dynamic Trust Scoring** — Five-component weighted trust function (sharing contribution, policy compliance, data reliability, engagement, security posture) computed at decryption time
+- **Risk-Adaptive Policies** — FIPS 199 high-water mark classification with Bell-LaPadula clearance model
+- **Targeted Revocation** — AGK rotation revokes one organization without touching any other member's keys
+- **STIX 2.1 Intelligence** — Structured threat bundles (indicators, malware, attack-patterns, identities, observed-data)
+- **CTI Correlation** — Cross-organizational indicator linking for campaign reconstruction
+- **Knowledge Graph** — Interactive force-directed visualization of threat relationships
+- **MITRE ATT&CK Mapping** — Technique heatmap with collaborative filtering predictions
 
 ---
 
-## 6. Project Structure
+## Architecture
 
-```text
-CTI-BTP/
-├── backend/
-│   ├── app.py                     # Main Flask routes and API orchestration
-│   ├── database.py                # SQLite connection and schema
-│   ├── pdf_cti_extractor.py       # Member 1: PDF parsing and normalization
-│   ├── knowledge_graph.py         # Member 1: Graph data builder
-│   ├── graph_analytics.py         # Member 1: PageRank algorithm
-│   ├── ai_predictor.py            # Member 2: ML severity prediction
-│   ├── temporal_engine.py         # Member 2: Dynamic Risk Decay math
-│   ├── crypto_engine.py           # Member 3: Attribute-Based Encryption
-│   ├── policy_engine.py           # Member 4: Access control logic
-│   ├── organizations.py           # Organization CRUD
-│   ├── authentication.py          # JWT Authentication
-│   └── advanced_cti.py            # Blueprint for advanced routes
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx                # Two-tier navigation & App shell
-│   │   ├── DashboardOverview.jsx  # Global KPI & AI dashboard
-│   │   ├── PDFIntelligence.jsx    # Member 1: PDF upload & extraction UI
-│   │   ├── KnowledgeGraph.jsx     # Member 1: Force-directed graph UI
-│   │   ├── TemporalIntelligence.jsx# Member 2: Risk timeline UI
-│   │   ├── ATTACKNavigator.jsx    # Member 2: Heatmap & Collaborative AI
-│   │   ├── AccessControl.jsx      # Member 4: Policy engine UI
-│   │   ├── CryptoSharing.jsx      # Member 3: Encryption UI
-│   │   └── api.js                 # Fetch wrapper and auth tokens
-│   ├── package.json
-│   └── vite.config.js
-├── data/
-│   └── cti.db                     # SQLite database
-└── README.md
+The platform implements an **8-stage pipeline** with a continuous feedback loop:
 
 ```
+CTI Sources (Organizations + OSINT)
+        │
+   1. CTI Collection ──── Ingest raw threat data (hashes, IPs, domains, TTPs)
+        │
+   2. Normalization ───── Convert to STIX 2.1 format
+        │
+   3. CTI Correlation ─── Link related indicators across organizations
+        │
+   4. Risk Analysis ───── Assess severity (CVSS, EPSS, sector impact)
+        │
+   5. Trust Profile ───── Compute org trust from behavioral signals ◄──┐
+        │                                                                │
+   6. Access Decision ─── Map sensitivity × trust → attribute policy    │
+        │                                                                │
+   7. PR-RABE Encrypt ─── LSSS policy with hidden attributes (AGK)     │
+        │                                                                │
+   8. Distribution ────── Ciphertext + header to authorized consumers   │
+                                                                         │
+   Feedback Loop: submissions, violations, behavior ─────────────────────┘
+```
 
-Copy this directly into your `README.md` file.
+---
 
-markdown
-````
-## ⚙️ Installation and Setup
+## Project Structure
+
+```
+CTI-BTP/
+├── backend/
+│   ├── app.py                    # Flask API routes and middleware
+│   ├── crypto_engine.py          # AES-256-GCM + HKDF encryption pipeline
+│   ├── prrabe_interface.py       # PR-RABE operations and AGK management
+│   ├── policy_engine.py          # Risk-adaptive LSSS policy generation
+│   ├── trust_engine.py           # Dynamic trust scoring (5 components)
+│   ├── advanced_cti.py           # CTI record management + STIX bundles
+│   ├── advanced_cti_processor.py # CTI processing and normalization
+│   ├── correlation.py            # Cross-org indicator correlation
+│   ├── risk_analysis.py          # CVSS/EPSS threat risk assessment
+│   ├── authentication.py         # JWT auth with bcrypt
+│   ├── organizations.py          # Organization CRUD + trust tracking
+│   ├── database.py               # SQLite connection and schema
+│   ├── ai_predictor.py           # ML severity prediction
+│   ├── temporal_engine.py        # Dynamic risk decay
+│   ├── knowledge_graph.py        # Graph data builder
+│   ├── graph_analytics.py        # PageRank centrality
+│   ├── pdf_cti_extractor.py      # PDF threat report ingestion
+│   ├── crypto/                   # PR-RABE_P cryptographic implementation
+│   │   ├── prrabe/               # Core scheme (setup, encrypt, decrypt, AGK)
+│   │   ├── demo_simple.py        # Standalone ABE demo
+│   │   └── demo_slide19.py       # Proposal slide 19 walkthrough
+│   ├── policy_simulation.py      # Synthetic policy engine workload
+│   └── tests/                    # Test suite
+├── frontend/
+│   └── src/
+│       ├── App.jsx               # Navigation and app shell
+│       ├── CryptoSharing.jsx     # PR-RABE encrypt/decrypt interface
+│       ├── DashboardOverview.jsx  # Platform statistics dashboard
+│       ├── CTISubmissionForm.jsx  # CTI submission with STIX generation
+│       ├── KnowledgeGraph.jsx     # Threat relationship graph
+│       ├── ATTACKNavigator.jsx    # MITRE ATT&CK heatmap
+│       ├── TemporalIntelligence.jsx # Threat timeline analysis
+│       ├── PDFIntelligence.jsx    # PDF extraction interface
+│       ├── AccessControl.jsx      # Organization/user management
+│       ├── LandingPage.jsx        # Public landing page
+│       ├── LoginPage.jsx          # Authentication UI
+│       └── api.js                 # API client with token management
+├── scripts/
+│   └── seed_demo.py              # Database seeding (orgs, users, CTI records)
+├── docs/
+│   └── crypto/DEVIATIONS.md      # PR-RABE implementation notes
+├── requirements.txt              # Python dependencies
+├── requirements-crypto.txt       # Optional: charm-crypto (Linux only)
+└── README.md
+```
+
+---
+
+## Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| Backend | Flask 3.x (Python 3.11) |
+| Frontend | React 18 + Vite |
+| Database | SQLite (WAL mode) |
+| Encryption | PyCryptodome (AES-256-GCM), HKDF-SHA256 |
+| Authentication | JWT + bcrypt |
+| CTI Format | STIX 2.1 |
+| Visualization | react-force-graph-2d, Lucide Icons |
+
+---
+
+## Quick Start (Reproducible Setup)
 
 ### Prerequisites
 
-Ensure the following tools are installed on your system:
-
-- Python 3.10 or later
-- Node.js and npm
+- Python 3.10+
+- Node.js 18+ and npm
 - Git
 
-### Step 1: Clone the Repository
+### 1. Clone and install dependencies
 
 ```bash
-git clone https://github.com/jadhav1919/CTI-BTP.git
+git clone https://github.com/manasa-manoj-nbr/CTI-BTP.git
 cd CTI-BTP
-````
-
-### Step 2: Set Up the Backend
-
-Create a Python virtual environment:
-
-bash
 ```
+
+**Backend (Python):**
+
+```bash
 python -m venv .venv
-```
 
-Activate the virtual environment.
+# Windows
+.venv\Scripts\activate
 
-Windows (PowerShell):
-
-powershell
-```
-.\.venv\Scripts\Activate.ps1
-```
-
-macOS/Linux:
-
-bash
-```
+# macOS/Linux
 source .venv/bin/activate
+
+pip install -r requirements.txt
 ```
 
-Install the required dependencies:
+**Frontend (Node):**
 
-bash
-```
-pip install flask flask-cors pypdf
-```
-
-### Step 3: Set Up the Frontend
-
-Navigate to the frontend directory:
-
-bash
-```
+```bash
 cd frontend
-```
-
-Install the Node.js dependencies:
-
-bash
-```
 npm install
-```
-
-Return to the project root:
-
-bash
-```
 cd ..
 ```
 
-### Step 4: Run the Backend Server
+### 2. Initialize the database and seed demo data
 
-From the project root, execute:
-
-bash
+```bash
+python -m scripts.seed_demo
 ```
+
+This creates the SQLite database (`data/cti.db`) with:
+- 3 organizations (Alpha Bank, City Hospital, Delta Insurance)
+- 5 user accounts (see credentials below)
+- 6 diverse CTI records with full STIX 2.1 bundles
+- Submission history that sets Alpha Bank's trust score to 82 (High)
+
+### 3. Start the application
+
+**Terminal 1 — Backend (Flask API on port 5000):**
+
+```bash
 python -m backend.app
 ```
 
-The Flask backend will run at:
+**Terminal 2 — Frontend (Vite dev server on port 5173):**
 
-`http://127.0.0.1:5000`
-
-### Step 5: Run the Frontend Server
-
-Open a second terminal and navigate to the frontend directory:
-
-bash
-```
-cd CTI-BTP/frontend
-```
-
-Start the Vite development server:
-
-bash
-```
+```bash
+cd frontend
 npm run dev
 ```
 
-The frontend will typically be available at:
+Open **http://localhost:5173** in your browser.
 
-`http://localhost:5173`
+### Demo Credentials
 
-### Step 6: Access the Application
+| Email | Password | Organization | Sector | Trust |
+|-------|----------|-------------|--------|-------|
+| alice@alphabank.com | alice123 | Alpha Bank | Finance | 82 (High) |
+| bob@cityhospital.com | bob123 | City Hospital | Healthcare | 50 (Medium) |
+| carol@deltainsurance.com | carol123 | Delta Insurance | Finance | 50 (Medium) |
+| admin@alphabank.com | admin123 | Alpha Bank | Finance | 82 (High) |
+| eve@cityhospital.com | eve123 | City Hospital | Healthcare | 50 (Medium) |
 
-1. Ensure both the backend and frontend servers are running.
-2. Open `http://localhost:5173` in your browser.
-3. Register or log in as an organization.
-4. Explore the CTI dashboard, PDF intelligence extraction, knowledge graph, AI predictions, access control, and cryptographic sharing features.
+> **Tip:** Log in as Alice (High trust) to see full decryption access, then as Bob (Medium trust) to see restricted access — this demonstrates the risk-adaptive PR-RABE access control in action.
 
-Note: If the repository contains a `requirements.txt` file, install all backend dependencies using `pip install -r requirements.txt`. Additional configuration may be required depending on your local environment.
+---
 
-```
+## Base Paper
 
-```
+R. Yang, T. Wang, N. Jin, B. Yang, Y. Zhou, D. Zhang, and X. Xin, "PR-RABE: Privacy-preserving and Revocable Registered Attribute-Based Encryption with lightweight encryption," *Computer Standards & Interfaces*, vol. 98, p. 104158, 2026.
+
+---
+
+## License
+
+This project is developed as part of the B.Tech curriculum at IIIT Kottayam and is intended for academic purposes.

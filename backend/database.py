@@ -190,6 +190,29 @@ def initialize_database():
             ON audit_logs(timestamp)
         """)
 
+        # 9. Create the encrypted_records table for stored ciphertexts.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS encrypted_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cti_record_id INTEGER NOT NULL,
+                ciphertext TEXT NOT NULL,
+                policy_display TEXT NOT NULL,
+                sensitivity TEXT,
+                classification TEXT,
+                encrypted_by_user_id INTEGER NOT NULL,
+                encrypted_by_org_id INTEGER NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cti_record_id) REFERENCES cti_records(id),
+                FOREIGN KEY (encrypted_by_user_id) REFERENCES users(id),
+                FOREIGN KEY (encrypted_by_org_id) REFERENCES organizations(id)
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_encrypted_records_cti
+            ON encrypted_records(cti_record_id)
+        """)
+
 
 # --------------------------------------------------
 # LEGACY CTI INDICATORS

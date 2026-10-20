@@ -101,6 +101,7 @@ def compute_trust_score(org_id):
     trust = max(0, min(100, trust))
 
     _persist(get_connection(), org_id, trust)
+    _notify_policy_engine(org_id, trust)
 
     return {
         "org_id": org_id,
@@ -154,6 +155,16 @@ def _level(score):
     elif score >= TRUST_MEDIUM:
         return "medium"
     return "low"
+
+
+def _notify_policy_engine(org_id, trust_score):
+    """Push the new trust level to the policy engine so it can fire GRANT/REVOKE events."""
+    try:
+        from backend.policy_engine import update_trust
+        level = "High" if trust_score >= TRUST_HIGH else "Medium" if trust_score >= TRUST_MEDIUM else "Low"
+        update_trust(org_id, level, trigger="trust_recomputed")
+    except Exception:
+        pass
 
 
 def _persist(conn, org_id, score):

@@ -66,17 +66,21 @@ export default function DashboardOverview({ records, organizations }) {
       <div className="dash-card" style={{ marginBottom: '24px', borderLeft: '4px solid #10b981', background: '#f0fdf4' }}>
         <div className="dash-card-header">
           <Cpu size={20} color="#10b981" />
-          <h3 style={{ color: '#168568' }}>AI Threat Prediction (Machine Learning)</h3>
+          <h3 style={{ color: '#168568' }}>Threat Severity Estimate (Weighted Heuristic)</h3>
         </div>
         {aiData && aiData.status === "Success" ? (
-          <div style={{ display: 'flex', gap: '40px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '40px', alignItems: 'center', flexWrap: 'wrap' }}>
             <div>
-              <p style={{ margin: 0, color: '#77758e', fontSize: '12px', fontWeight: 600 }}>PREDICTED NEXT SEVERITY</p>
-              <h2 style={{ margin: '4px 0 0 0', color: '#168568', fontSize: '32px' }}>{aiData.ai_predicted_severity}</h2>
+              <p style={{ margin: 0, color: '#77758e', fontSize: '12px', fontWeight: 600 }}>ESTIMATED SEVERITY</p>
+              <h2 style={{ margin: '4px 0 0 0', color: '#168568', fontSize: '32px' }}>{aiData.predicted_severity}</h2>
             </div>
             <div style={{ borderLeft: '1px solid #bbf7d0', paddingLeft: '40px' }}>
-              <p style={{ margin: 0, color: '#77758e', fontSize: '12px', fontWeight: 600 }}>MODEL CONFIDENCE</p>
-              <h3 style={{ margin: '4px 0 0 0', color: '#292454', fontSize: '24px' }}>{aiData.model_accuracy}%</h3>
+              <p style={{ margin: 0, color: '#77758e', fontSize: '12px', fontWeight: 600 }}>CONFIDENCE SCORE</p>
+              <h3 style={{ margin: '4px 0 0 0', color: '#292454', fontSize: '24px' }}>{aiData.confidence_score}%</h3>
+            </div>
+            <div style={{ borderLeft: '1px solid #bbf7d0', paddingLeft: '40px' }}>
+              <p style={{ margin: 0, color: '#77758e', fontSize: '12px', fontWeight: 600 }}>METHOD</p>
+              <p style={{ margin: '4px 0 0 0', color: '#45435f', fontSize: '13px' }}>{aiData.method}</p>
             </div>
             <div style={{ borderLeft: '1px solid #bbf7d0', paddingLeft: '40px' }}>
               <p style={{ margin: 0, color: '#77758e', fontSize: '12px', fontWeight: 600 }}>FEATURES USED</p>
@@ -84,7 +88,7 @@ export default function DashboardOverview({ records, organizations }) {
             </div>
           </div>
         ) : (
-          <p className="dash-loading">{aiData?.message || "Training AI Model..."}</p>
+          <p className="dash-loading">{aiData?.message || "Computing severity estimate..."}</p>
         )}
       </div>
 

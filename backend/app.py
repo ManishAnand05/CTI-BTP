@@ -6,7 +6,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.crypto_engine import encrypt_payload, decrypt_payload, revoke_access, restore_access, get_system_status
-from backend.trust_engine import compute_trust_score, generate_policy_string
+from backend.trust_engine import compute_trust_score
+from backend.policy_engine import classify, build_policy, policy_to_string
 import ipaddress
 import json
 import re
@@ -543,6 +544,23 @@ def auth_login():
         return jsonify({"message": "Login successful", "access_token": create_access_token(user["id"]), "token_type": "Bearer", "user": public_user(user)}), 200
     except Exception: return error_response("Login failed", 500)
 
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth
+def auth_me():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    org = None
+    try:
+        conn = get_connection()
+        row = conn.execute("SELECT id, name, sector, trust_score FROM organizations WHERE id = ?", (user["organization_id"],)).fetchone()
+        if row:
+            org = dict(row)
+        conn.close()
+    except Exception:
+        pass
+    return jsonify({"user": public_user(user), "organization": org}), 200
+
 @app.route("/api/crypto/status", methods=["GET"])
 @require_auth
 def crypto_status():
@@ -576,7 +594,8 @@ def compute_all_trust():
 @app.route("/api/crypto/encrypt", methods=["POST", "OPTIONS"])
 def crypto_encrypt():
     if request.method == "OPTIONS": return jsonify({}), 200
-    if not current_user(): return error_response("Authentication required", 401)
+    user = current_user()
+    if not user: return error_response("Authentication required", 401)
     data = get_json_object()
     if not data:
         return error_response("Send a valid JSON object")
@@ -587,23 +606,101 @@ def crypto_encrypt():
     if data.get("auto_policy"):
         severity = record.get("severity", "low")
         sector = policy.get("sector", "All")
-        policy_string = generate_policy_string(severity, sector)
+        risk_map = {"critical": "Critical", "high": "High", "medium": "Medium", "low": "Low"}
+        risk_level = risk_map.get(severity.lower(), "Low")
+        sensitivity, reasons = classify(risk_level)
+        struct_policy = build_policy(sensitivity, [sector] if sector != "All" else ["All"])
+        policy_string = policy_to_string(struct_policy)
     else:
         policy_string = None
+        sensitivity = None
+        reasons = None
 
     ciphertext = encrypt_payload(record, policy_string if policy_string else policy)
+
+    cti_record_id = record.get("id")
+    if cti_record_id:
+        try:
+            with get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO encrypted_records
+                        (cti_record_id, ciphertext, policy_display, sensitivity, classification,
+                         encrypted_by_user_id, encrypted_by_org_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    cti_record_id, ciphertext,
+                    policy_string or " AND ".join(sorted(policy.values())) if isinstance(policy, dict) else str(policy),
+                    sensitivity,
+                    json.dumps(reasons) if reasons else None,
+                    user["id"], user["organization_id"],
+                ))
+        except Exception:
+            pass
 
     result = {"ciphertext": ciphertext}
     if policy_string:
         result["generated_policy"] = policy_string
+        result["sensitivity"] = sensitivity
+        result["classification"] = reasons
     return jsonify(result), 200
+
+@app.route("/api/crypto/encrypted", methods=["GET"])
+@require_auth
+def list_encrypted_records():
+    try:
+        with get_connection() as conn:
+            rows = conn.execute("""
+                SELECT er.id, er.cti_record_id, er.policy_display, er.sensitivity,
+                       er.classification, er.created_at,
+                       cr.title, cr.severity, cr.category, cr.sharing_sector,
+                       o.name AS encrypted_by_org
+                FROM encrypted_records er
+                JOIN cti_records cr ON er.cti_record_id = cr.id
+                JOIN organizations o ON er.encrypted_by_org_id = o.id
+                ORDER BY er.created_at DESC
+            """).fetchall()
+        return jsonify({"records": [dict(r) for r in rows]}), 200
+    except Exception as e:
+        return error_response(f"Failed to list encrypted records: {str(e)}", 500)
 
 @app.route("/api/crypto/decrypt", methods=["POST", "OPTIONS"])
 def crypto_decrypt():
     if request.method == "OPTIONS": return jsonify({}), 200
-    if not current_user(): return error_response("Authentication required", 401)
+    user = current_user()
+    if not user: return error_response("Authentication required", 401)
+
     data = get_json_object()
-    result = decrypt_payload(data.get("ciphertext"), data.get("user_attributes"))
+
+    ciphertext = data.get("ciphertext")
+    encrypted_record_id = data.get("encrypted_record_id")
+
+    if encrypted_record_id and not ciphertext:
+        try:
+            with get_connection() as conn:
+                row = conn.execute(
+                    "SELECT ciphertext FROM encrypted_records WHERE id = ?",
+                    (encrypted_record_id,),
+                ).fetchone()
+            if not row:
+                return error_response("Encrypted record not found", 404)
+            ciphertext = row["ciphertext"]
+        except Exception as e:
+            return error_response(f"Failed to fetch encrypted record: {str(e)}", 500)
+
+    if not ciphertext:
+        return error_response("No ciphertext provided", 400)
+
+    org_id = user["organization_id"]
+    with get_connection() as conn:
+        org_row = conn.execute(
+            "SELECT id, name, sector, trust_score FROM organizations WHERE id = ?",
+            (org_id,),
+        ).fetchone()
+    if not org_row:
+        return error_response("Organization not found", 404)
+
+    server_attributes = {"id": org_row["id"], "sector": org_row["sector"], "trust_score": org_row["trust_score"]}
+    result = decrypt_payload(ciphertext, server_attributes)
     return jsonify(result), 200 if result["success"] else 403
 
 @app.route("/api/crypto/revoke", methods=["POST", "OPTIONS"])
@@ -611,9 +708,27 @@ def crypto_revoke():
     if request.method == "OPTIONS": return jsonify({}), 200
     if not current_user(): return error_response("Authentication required", 401)
     data = get_json_object()
-    if data.get("action") == "restore": restore_access(data.get("organization_id"))
-    else: revoke_access(data.get("organization_id"))
-    return jsonify({"message": "Action successful"}), 200
+    org_id = data.get("organization_id")
+    policy_events = []
+    if data.get("action") == "restore":
+        restore_access(org_id)
+        action = "restore"
+        try:
+            from backend.policy_engine import update_trust
+            trust = compute_trust_score(org_id)
+            level = "High" if trust and trust["trust_score"] >= 80 else "Medium" if trust and trust["trust_score"] >= 50 else "Low"
+            policy_events = update_trust(org_id, level, trigger="access_restored")
+        except Exception:
+            pass
+    else:
+        revoke_access(org_id)
+        action = "revoke"
+        try:
+            from backend.policy_engine import update_trust
+            policy_events = update_trust(org_id, "Low", trigger="access_revoked")
+        except Exception:
+            pass
+    return jsonify({"message": "Action successful", "action": action, "policy_events": len(policy_events)}), 200
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "5000")), debug=os.environ.get("FLASK_DEBUG", "1") == "1")

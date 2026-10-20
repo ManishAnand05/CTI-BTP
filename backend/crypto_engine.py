@@ -46,51 +46,51 @@ def _policy_to_attributes(policy):
     """Convert a policy dict to a set of attribute strings.
 
     Input:  {"sector": "Finance", "min_trust": 80}
-    Output: {"SECTOR:FINANCE", "TRUST:HIGH"}
+    Output: {"Sector:Finance", "Trust>=High"}
     """
     attrs = set()
     sector = policy.get("sector")
     if sector and sector != "All":
-        attrs.add(f"SECTOR:{sector.upper()}")
+        attrs.add(f"Sector:{sector}")
 
     min_trust = policy.get("min_trust", 0)
     if min_trust >= 80:
-        attrs.add("TRUST:HIGH")
+        attrs.add("Trust>=High")
     elif min_trust >= 50:
-        attrs.add("TRUST:MEDIUM")
+        attrs.add("Trust>=Medium")
     else:
-        attrs.add("TRUST:LOW")
+        attrs.add("Trust>=Low")
 
     return attrs
 
 
 def _policy_string_to_attributes(policy_string):
-    """Parse an LSSS policy string like '(SECTOR:FINANCE AND TRUST:HIGH)'.
+    """Parse an LSSS policy string like 'Sector:Finance AND Trust>=High'.
 
     Returns a set of attribute strings.
     """
     clean = policy_string.strip().strip("()")
     parts = [p.strip() for p in clean.split("AND")]
-    return {p.strip() for p in parts if ":" in p}
+    return {p.strip() for p in parts if ":" in p or ">=" in p}
 
 
 def _org_attributes(user_attrs, trust_score=None):
-    """Build the attribute set for an organization."""
+    """Build the attribute set for an organization (matches policy_engine format)."""
     attrs = set()
     sector = user_attrs.get("sector")
     if sector:
-        attrs.add(f"SECTOR:{sector.upper()}")
+        attrs.add(f"Sector:{sector}")
 
     score = trust_score if trust_score is not None else user_attrs.get("trust_score", 0)
     if score >= 80:
-        attrs.add("TRUST:HIGH")
-        attrs.add("TRUST:MEDIUM")
-        attrs.add("TRUST:LOW")
+        attrs.add("Trust>=High")
+        attrs.add("Trust>=Medium")
+        attrs.add("Trust>=Low")
     elif score >= 50:
-        attrs.add("TRUST:MEDIUM")
-        attrs.add("TRUST:LOW")
+        attrs.add("Trust>=Medium")
+        attrs.add("Trust>=Low")
     else:
-        attrs.add("TRUST:LOW")
+        attrs.add("Trust>=Low")
 
     return attrs
 

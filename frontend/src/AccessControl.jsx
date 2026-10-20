@@ -107,8 +107,11 @@ export default function AccessControl() {
         details: data.policy || data.details || {},
         trust_score: data.trust_score,
         trust_level: data.trust_level,
-        trust_components: data.trust_components,
-        lsss_policy: data.lsss_policy,
+        sensitivity: data.sensitivity,
+        policy_string: data.policy_string,
+        classification: data.classification,
+        attributes: data.attributes,
+        missing: data.missing,
         risk_level: data.risk_level,
         risk_score: data.risk_score,
       });
@@ -183,21 +186,27 @@ export default function AccessControl() {
               <div className="ac-details">
                 <h4>Access Decision Context:</h4>
                 <ul>
-                  {decision.trust_score !== undefined && (
-                    <li><strong>Dynamic Trust Score:</strong> {decision.trust_score}/100 ({decision.trust_level})</li>
+                  {decision.sensitivity && (
+                    <li><strong>Sensitivity (FIPS 199):</strong> {decision.sensitivity}</li>
                   )}
-                  {decision.lsss_policy && (
-                    <li><strong>LSSS Policy:</strong> <code>{decision.lsss_policy}</code></li>
+                  {decision.policy_string && (
+                    <li><strong>Required Policy (LSSS):</strong> <code>{decision.policy_string}</code></li>
+                  )}
+                  {decision.trust_score !== undefined && (
+                    <li><strong>Trust:</strong> {decision.trust_score}/100 — {decision.trust_level}</li>
+                  )}
+                  {decision.attributes && decision.attributes.length > 0 && (
+                    <li><strong>Org Attributes:</strong> <code>{decision.attributes.join(", ")}</code></li>
+                  )}
+                  {decision.missing && decision.missing.length > 0 && (
+                    <li><strong>Missing:</strong> <code>{decision.missing.join(", ")}</code></li>
                   )}
                   {decision.risk_level && (
-                    <li><strong>Risk Level:</strong> {decision.risk_level} (score: {decision.risk_score})</li>
+                    <li><strong>Risk Level:</strong> {decision.risk_level}{decision.risk_score != null ? ` (score: ${decision.risk_score})` : ""}</li>
                   )}
-                  {decision.trust_components && decision.trust_components.sharing && (
-                    <li><strong>Trust Breakdown:</strong> Sharing={decision.trust_components.sharing.score} ({decision.trust_components.sharing.submissions} submissions), Violations={decision.trust_components.violations.count}, Reliability={decision.trust_components.reliability.score}%</li>
+                  {decision.classification && decision.classification.length > 0 && (
+                    <li><strong>Classification:</strong> {decision.classification.join("; ")}</li>
                   )}
-                  {Object.entries(decision.details).map(([k, v]) => (
-                    <li key={k}><strong>{k}:</strong> {String(v)}</li>
-                  ))}
                 </ul>
               </div>
             </div>

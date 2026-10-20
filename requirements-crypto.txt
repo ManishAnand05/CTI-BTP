@@ -1,0 +1,4 @@
+# Member 3 crypto module. Needs Linux/WSL2 with: libgmp-dev libssl-dev python3-dev flex bison m4 + PBC 1.0.0
+charm-crypto-framework==0.62
+cryptography>=42
+pytest>=8
