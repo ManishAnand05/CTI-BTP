@@ -23,7 +23,9 @@ try:
     from backend.crypto.prrabe.owner import AttributeGroups, DataOwner
     from backend.crypto.prrabe.hybrid import seal, open_envelope
     CHARM_AVAILABLE = True
-except ImportError:
+except Exception as _charm_err:
+    import sys
+    print(f"[PR-RABE] charm-crypto not loaded: {type(_charm_err).__name__}: {_charm_err}", file=sys.stderr)
     CHARM_AVAILABLE = False
 
 SECTORS = ["FINANCE", "HEALTHCARE", "EDUCATION", "TECHNOLOGY", "GOVERNMENT", "ENERGY"]
