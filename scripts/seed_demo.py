@@ -280,6 +280,60 @@ conn.execute(
     (alpha_id,),
 )
 conn.commit()
+
+# ── 5. Seed incentive wallets ─────────────────────────────────────
+
+for name, oid in org_ids.items():
+    existing = conn.execute(
+        "SELECT id FROM incentive_wallet WHERE organization_id = ?", (oid,)
+    ).fetchone()
+    if existing:
+        print(f"  Wallet for {name} already exists")
+        continue
+
+    if name == "Alpha Bank":
+        balance, earned = 65.0, 65.0
+    elif name == "City Hospital":
+        balance, earned = 20.0, 20.0
+    else:
+        balance, earned = 10.0, 10.0
+
+    conn.execute(
+        "INSERT INTO incentive_wallet (organization_id, balance, lifetime_earned, lifetime_spent) "
+        "VALUES (?, ?, ?, 0)",
+        (oid, balance, earned),
+    )
+    print(f"  Wallet for {name}: ${balance}")
+
+conn.commit()
+
+# Seed some transactions for Alpha Bank
+alpha_wallet = conn.execute(
+    "SELECT id FROM incentive_transactions WHERE organization_id = ?",
+    (alpha_id,),
+).fetchone()
+if not alpha_wallet:
+    txns = [
+        (alpha_id, 10.0, "shared_cti", "1", 10.0),
+        (alpha_id, 5.0, "high_confidence_bonus", "1", 15.0),
+        (alpha_id, 10.0, "shared_cti", "2", 25.0),
+        (alpha_id, 10.0, "shared_cti", "3", 35.0),
+        (alpha_id, 5.0, "high_confidence_bonus", "3", 40.0),
+        (alpha_id, 3.0, "cross_sector_bonus", "3", 43.0),
+        (alpha_id, 10.0, "shared_cti", "4", 53.0),
+        (alpha_id, 10.0, "shared_cti", "5", 63.0),
+        (alpha_id, 2.0, "high_confidence_bonus", "5", 65.0),
+    ]
+    for org, amt, reason, ref, bal in txns:
+        conn.execute(
+            "INSERT INTO incentive_transactions "
+            "(organization_id, amount, reason, reference_id, balance_after) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (org, amt, reason, ref, bal),
+        )
+    print(f"  Seeded {len(txns)} wallet transactions for Alpha Bank")
+
+conn.commit()
 conn.close()
 
 print("\nSeed complete!")
@@ -287,3 +341,4 @@ print("  3 organizations  (Alpha Bank trust=82, others trust=50)")
 print("  5 users           (alice, bob, carol, admin, eve)")
 print("  6 CTI records     (with STIX 2.1 bundles)")
 print("  5 submissions     (Alpha Bank contribution history)")
+print("  3 wallets         (Alpha=$65, City=$20, Delta=$10)")

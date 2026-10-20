@@ -213,6 +213,53 @@ def initialize_database():
             ON encrypted_records(cti_record_id)
         """)
 
+        # 10. PR-RABE ceremony event log.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS prrabe_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT '{}',
+                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prrabe_events_type
+            ON prrabe_events(event_type)
+        """)
+
+        # 11. Incentive wallet — one row per organisation.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incentive_wallet (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL UNIQUE,
+                balance REAL NOT NULL DEFAULT 0,
+                lifetime_earned REAL NOT NULL DEFAULT 0,
+                lifetime_spent REAL NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id)
+            )
+        """)
+
+        # 12. Incentive transaction ledger.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incentive_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                reason TEXT NOT NULL,
+                reference_id TEXT,
+                balance_after REAL NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id)
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_incentive_tx_org
+            ON incentive_transactions(organization_id)
+        """)
+
 
 # --------------------------------------------------
 # LEGACY CTI INDICATORS

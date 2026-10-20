@@ -1,0 +1,72 @@
+.iw-page { padding: 0; }
+.iw-loading { padding: 50px; color: #94a3b8; display: flex; align-items: center; gap: 10px; }
+.iw-header { margin-bottom: 24px; }
+.iw-header h2 { display: flex; align-items: center; gap: 10px; color: #e2e8f0; font-size: 22px; margin: 0 0 8px; }
+.iw-header p { color: #94a3b8; font-size: 14px; margin: 0; line-height: 1.5; }
+
+/* Tabs */
+.iw-tabs { display: flex; gap: 4px; margin-bottom: 20px; background: rgba(30, 27, 56, 0.6); border-radius: 10px; padding: 4px; }
+.iw-tabs button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; border: none; border-radius: 8px; background: transparent; color: #94a3b8; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.iw-tabs button.active { background: rgba(167, 139, 250, 0.15); color: #c4b5fd; }
+.iw-tabs button:hover:not(.active) { color: #e2e8f0; }
+
+/* Wallet Card */
+.iw-wallet-card { position: relative; border-radius: 20px; overflow: hidden; margin-bottom: 20px; border: 1px solid rgba(167, 139, 250, 0.2); }
+.iw-wallet-bg { position: absolute; inset: 0; background: linear-gradient(135deg, #1e1b38, #2d1b69, #1e1b38); opacity: 0.9; }
+.iw-wallet-content { position: relative; padding: 28px; }
+.iw-wallet-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.iw-wallet-label { color: #94a3b8; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; }
+.iw-tier { padding: 3px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; border: 1px solid; }
+.iw-balance { margin-bottom: 20px; }
+.iw-balance-amount { font-size: 42px; font-weight: 800; color: #fff; letter-spacing: -1px; }
+.iw-balance-label { display: block; color: #94a3b8; font-size: 12px; margin-top: 4px; }
+.iw-wallet-stats { display: flex; gap: 32px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.iw-wallet-stats div { display: flex; flex-direction: column; gap: 2px; }
+.iw-wallet-stats small { color: #64748b; font-size: 11px; }
+.iw-wallet-stats strong { font-size: 14px; }
+.iw-tier-progress { margin-top: 16px; }
+.iw-tier-bar { height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 4px; overflow: hidden; }
+.iw-tier-fill { height: 100%; background: linear-gradient(90deg, #7c3aed, #a78bfa); border-radius: 4px; transition: width 0.4s; }
+.iw-tier-progress small { color: #64748b; font-size: 11px; margin-top: 4px; display: block; }
+
+/* Token Schedule */
+.iw-schedule { background: rgba(30, 27, 56, 0.5); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+.iw-schedule h3 { color: #e2e8f0; font-size: 14px; margin: 0 0 12px; }
+.iw-schedule-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.iw-sched-item { padding: 10px 14px; border-radius: 8px; font-size: 12px; color: #94a3b8; display: flex; align-items: center; gap: 10px; }
+.iw-sched-item.earn { background: rgba(16, 185, 129, 0.06); border: 1px solid rgba(16, 185, 129, 0.15); }
+.iw-sched-item.penalty { background: rgba(239, 68, 68, 0.06); border: 1px solid rgba(239, 68, 68, 0.15); }
+.iw-sched-item span { font-weight: 700; font-size: 14px; }
+.iw-sched-item.earn span { color: #6ee7b7; }
+.iw-sched-item.penalty span { color: #f87171; }
+
+/* Transaction History */
+.iw-txns { background: rgba(30, 27, 56, 0.5); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+.iw-txns h3 { color: #e2e8f0; font-size: 14px; margin: 0 0 12px; }
+.iw-empty { color: #64748b; font-size: 13px; }
+.iw-txn-list { display: flex; flex-direction: column; gap: 6px; }
+.iw-txn { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px; background: rgba(15, 13, 35, 0.4); border: 1px solid rgba(255, 255, 255, 0.04); }
+.iw-txn.earn { border-left: 3px solid rgba(16, 185, 129, 0.4); }
+.iw-txn.penalty { border-left: 3px solid rgba(239, 68, 68, 0.4); }
+.iw-txn-icon { flex-shrink: 0; }
+.iw-txn-detail { flex: 1; }
+.iw-txn-detail strong { display: block; color: #e2e8f0; font-size: 13px; }
+.iw-txn-detail small { color: #64748b; font-size: 11px; }
+.iw-txn-amount { font-weight: 700; font-size: 14px; min-width: 70px; text-align: right; }
+.iw-txn-bal { color: #64748b; font-size: 11px; min-width: 60px; text-align: right; }
+
+/* Leaderboard */
+.iw-leaderboard { background: rgba(30, 27, 56, 0.5); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 14px; padding: 20px; }
+.iw-leaderboard h3 { color: #e2e8f0; font-size: 14px; margin: 0 0 16px; display: flex; align-items: center; gap: 8px; }
+.iw-lb-list { display: flex; flex-direction: column; gap: 8px; }
+.iw-lb-row { display: flex; align-items: center; gap: 16px; padding: 14px 16px; border-radius: 10px; background: rgba(15, 13, 35, 0.4); border: 1px solid rgba(255, 255, 255, 0.06); }
+.iw-lb-row.first { border-color: rgba(167, 139, 250, 0.3); background: rgba(167, 139, 250, 0.05); }
+.iw-lb-rank { font-size: 18px; font-weight: 800; color: #64748b; min-width: 36px; }
+.iw-lb-row.first .iw-lb-rank { color: #a78bfa; }
+.iw-lb-info { flex: 1; }
+.iw-lb-info strong { display: block; color: #e2e8f0; font-size: 14px; }
+.iw-lb-info small { color: #64748b; font-size: 11px; }
+.iw-lb-tier { font-size: 11px; font-weight: 700; }
+.iw-lb-balance { font-size: 16px; font-weight: 700; color: #e2e8f0; min-width: 80px; text-align: right; }
+
+.iw-refresh { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 8px; border: 1px solid rgba(167, 139, 250, 0.2); background: rgba(255, 255, 255, 0.06); color: #c4b5fd; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 16px; }

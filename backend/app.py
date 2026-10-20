@@ -6,8 +6,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.crypto_engine import encrypt_payload, decrypt_payload, revoke_access, restore_access, get_system_status
-from backend.trust_engine import compute_trust_score
+from backend.trust_engine import compute_trust_score, get_trust_tier, generate_policy_string
 from backend.policy_engine import classify, build_policy, policy_to_string
+from backend.crypto.service import service as prrabe_service, get_events as get_prrabe_events
+from backend import incentive_engine
 import ipaddress
 import json
 import re
@@ -729,6 +731,187 @@ def crypto_revoke():
         except Exception:
             pass
     return jsonify({"message": "Action successful", "action": action, "policy_events": len(policy_events)}), 200
+
+# --------------------------------------------------
+# PR-RABE CEREMONY ROUTES
+# --------------------------------------------------
+
+@app.route("/api/prrabe/status", methods=["GET"])
+@require_auth
+def prrabe_status():
+    return jsonify(prrabe_service.get_status()), 200
+
+
+@app.route("/api/prrabe/init", methods=["POST"])
+@require_auth
+def prrabe_init():
+    data = get_json_object() or {}
+    num_slots = data.get("num_slots")
+    if num_slots is None:
+        num_slots = len(get_all_organizations())
+    if not isinstance(num_slots, int) or num_slots < 2:
+        return error_response("num_slots must be an integer >= 2")
+    try:
+        result = prrabe_service.init_system(num_slots)
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/keygen", methods=["POST"])
+@require_auth
+def prrabe_keygen():
+    data = get_json_object()
+    if not data or not valid_positive_id(data.get("organization_id")):
+        return error_response("organization_id is required")
+    org_id = data["organization_id"]
+    org = get_organization(org_id)
+    if not org:
+        return error_response("Organization not found", 404)
+
+    trust = compute_trust_score(org_id)
+    trust_tier = get_trust_tier(trust["trust_score"]) if trust else "LOW"
+
+    try:
+        result = prrabe_service.register_org(
+            org_id=org_id,
+            org_name=org["name"],
+            sector=org["sector"],
+            trust_tier=trust_tier,
+        )
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/aggregate", methods=["POST"])
+@require_auth
+def prrabe_aggregate():
+    try:
+        result = prrabe_service.run_aggregate()
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/encrypt", methods=["POST"])
+@require_auth
+def prrabe_encrypt():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not data.get("record_id"):
+        return error_response("record_id is required")
+
+    record_id = data["record_id"]
+    with get_connection() as conn:
+        rec = conn.execute(
+            "SELECT * FROM cti_records WHERE id = ?", (record_id,)
+        ).fetchone()
+    if not rec:
+        return error_response("CTI record not found", 404)
+    rec = dict(rec)
+
+    policy_string = data.get("policy")
+    if not policy_string:
+        policy_string = generate_policy_string(rec["severity"], rec["sharing_sector"])
+
+    payload = {
+        "title": rec["title"],
+        "category": rec["category"],
+        "indicator_type": rec["indicator_type"],
+        "indicator_value": rec["indicator_value"],
+        "severity": rec["severity"],
+        "confidence": rec["confidence"],
+        "description": rec["description"],
+        "sharing_sector": rec["sharing_sector"],
+        "risk_score": rec["risk_score"],
+        "risk_level": rec["risk_level"],
+    }
+
+    try:
+        result = prrabe_service.encrypt_record(
+            record_id=record_id,
+            policy_string=policy_string,
+            payload_dict=payload,
+            encrypted_by_org_id=user["organization_id"],
+        )
+        incentive_engine.reward_share(user["organization_id"], record_id)
+        if rec["confidence"] in ("high", "confirmed"):
+            incentive_engine.reward_high_confidence(user["organization_id"], record_id)
+        return jsonify(result), 200
+    except (RuntimeError, ValueError) as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/decrypt", methods=["POST"])
+@require_auth
+def prrabe_decrypt():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not data.get("record_id"):
+        return error_response("record_id is required")
+
+    org_id = data.get("organization_id") or user["organization_id"]
+    try:
+        result = prrabe_service.decrypt_record(org_id, data["record_id"])
+        status_code = 200 if result.get("success") else 403
+        return jsonify(result), status_code
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/revoke", methods=["POST"])
+@require_auth
+def prrabe_revoke():
+    data = get_json_object()
+    if not data or not valid_positive_id(data.get("organization_id")):
+        return error_response("organization_id is required")
+    attribute = data.get("attribute")
+    if not attribute:
+        return error_response("attribute is required (e.g. TRUST:HIGH)")
+
+    try:
+        result = prrabe_service.revoke_attribute(
+            data["organization_id"], attribute,
+        )
+        incentive_engine.penalize_revocation(data["organization_id"])
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/events", methods=["GET"])
+@require_auth
+def prrabe_events():
+    limit = request.args.get("limit", 50, type=int)
+    return jsonify({"events": get_prrabe_events(limit)}), 200
+
+
+# --------------------------------------------------
+# INCENTIVE ROUTES
+# --------------------------------------------------
+
+@app.route("/api/incentive/wallet", methods=["GET"])
+@require_auth
+def incentive_wallet():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    org_id = request.args.get("org_id", type=int) or user["organization_id"]
+    wallet = incentive_engine.get_wallet(org_id)
+    transactions = incentive_engine.get_transactions(org_id)
+    return jsonify({"wallet": wallet, "transactions": transactions}), 200
+
+
+@app.route("/api/incentive/leaderboard", methods=["GET"])
+@require_auth
+def incentive_leaderboard():
+    return jsonify({"leaderboard": incentive_engine.get_leaderboard()}), 200
+
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "5000")), debug=os.environ.get("FLASK_DEBUG", "1") == "1")

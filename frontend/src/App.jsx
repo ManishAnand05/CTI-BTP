@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity, ShieldCheck, LayoutDashboard, Database, Building2, RefreshCw, Search, Wifi,
-  AlertTriangle, LockKeyhole, ArrowLeft, LogOut, FileText, Crosshair, Plus, X
+  AlertTriangle, LockKeyhole, ArrowLeft, LogOut, FileText, Crosshair, Plus, X,
+  Key, ShieldOff, Wallet,
 } from 'lucide-react'
 import { api, API_BASE_URL, getAccessToken } from './api'
 import LandingPage from './LandingPage.jsx'
@@ -13,14 +14,20 @@ import AccessControl from './AccessControl.jsx'
 import CryptoSharing from './CryptoSharing.jsx'
 import DashboardOverview from './DashboardOverview.jsx'
 import ATTACKNavigator from './ATTACKNavigator.jsx'
+import KeyCeremony from './KeyCeremony.jsx'
+import RevocationDemo from './RevocationDemo.jsx'
+import IncentiveWallet from './IncentiveWallet.jsx'
 import './App.css'
 
 // GLOBAL navigation (when no org is selected)
 const GLOBAL_NAV = [
   { label: 'Overview', icon: LayoutDashboard },
   { label: 'Organizations', icon: Building2 },
-  { label: 'Access Control', icon: LockKeyhole },
+  { label: 'Key Ceremony', icon: Key },
   { label: 'Crypto Sharing', icon: ShieldCheck },
+  { label: 'Revocation Demo', icon: ShieldOff },
+  { label: 'Wallet', icon: Wallet },
+  { label: 'Access Control', icon: LockKeyhole },
 ]
 
 // ORG-level navigation (when a specific org is selected)
@@ -328,8 +335,11 @@ function App() {
     : {
         Overview: () => <DashboardOverview records={records} organizations={organizations} />,
         Organizations: renderOrganizations,
-        'Access Control': () => <AccessControl />,
+        'Key Ceremony': () => <KeyCeremony />,
         'Crypto Sharing': () => <CryptoSharing />,
+        'Revocation Demo': () => <RevocationDemo />,
+        'Wallet': () => <IncentiveWallet />,
+        'Access Control': () => <AccessControl />,
       }
 
   if (showLandingPage) return <LandingPage onOpenDashboard={() => setShowLandingPage(false)} />
