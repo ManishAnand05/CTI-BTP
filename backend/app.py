@@ -468,6 +468,16 @@ def list_organizations():
     try: return jsonify({"count": len(get_all_organizations()), "organizations": get_all_organizations()}), 200
     except Exception: return error_response("Organization retrieval failed", 500)
 
+@app.route("/api/organizations/public", methods=["GET"])
+def list_organizations_public():
+    """Return org id/name/sector for the registration form (no auth)."""
+    try:
+        orgs = get_all_organizations()
+        public = [{"id": o["id"], "name": o["name"], "sector": o["sector"]} for o in orgs]
+        return jsonify({"organizations": public}), 200
+    except Exception:
+        return error_response("Organization retrieval failed", 500)
+
 @app.route("/api/policies", methods=["GET"])
 @require_auth
 def list_policies():
@@ -525,7 +535,19 @@ def auth_register():
     if register_limiter.retry_after(limiter_key): return too_many_requests(register_limiter.retry_after(limiter_key))
     register_limiter.record(limiter_key)
     try:
-        user = register_user(name=data.get("name"), email=clean_email(data.get("email")), password=data.get("password"), organization_id=data.get("organization_id"))
+        org_id = data.get("organization_id")
+        if not org_id and data.get("new_org_name") and data.get("new_org_sector"):
+            org_name = data["new_org_name"].strip()
+            org_sector = data["new_org_sector"].strip()
+            if len(org_name) < 2:
+                return error_response("Organization name must be at least 2 characters.")
+            try:
+                org_id = register_organization(org_name, org_sector, 50)
+            except sqlite3.IntegrityError:
+                return error_response("Organization name already exists. Select it from the list instead.", 409)
+        if not org_id:
+            return error_response("Select an organization or create a new one.")
+        user = register_user(name=data.get("name"), email=clean_email(data.get("email")), password=data.get("password"), organization_id=org_id)
         return jsonify({"message": "Registration successful", "user": public_user(user)}), 201
     except ValueError as error: return error_response(str(error), 400)
     except Exception: return error_response("Registration failed", 500)
@@ -554,11 +576,10 @@ def auth_me():
         return error_response("Authentication required", 401)
     org = None
     try:
-        conn = get_connection()
-        row = conn.execute("SELECT id, name, sector, trust_score FROM organizations WHERE id = ?", (user["organization_id"],)).fetchone()
-        if row:
-            org = dict(row)
-        conn.close()
+        with get_connection() as conn:
+            row = conn.execute("SELECT id, name, sector, trust_score FROM organizations WHERE id = ?", (user["organization_id"],)).fetchone()
+            if row:
+                org = dict(row)
     except Exception:
         pass
     return jsonify({"user": public_user(user), "organization": org}), 200
@@ -761,10 +782,13 @@ def prrabe_init():
 @app.route("/api/prrabe/keygen", methods=["POST"])
 @require_auth
 def prrabe_keygen():
-    data = get_json_object()
-    if not data or not valid_positive_id(data.get("organization_id")):
-        return error_response("organization_id is required")
-    org_id = data["organization_id"]
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object() or {}
+    org_id = data.get("organization_id", user["organization_id"])
+    if prrabe_service.aggregated and org_id != user["organization_id"]:
+        return error_response("You can only generate keys for your own organization after aggregation", 403)
     org = get_organization(org_id)
     if not org:
         return error_response("Organization not found", 404)
@@ -837,6 +861,20 @@ def prrabe_encrypt():
             payload_dict=payload,
             encrypted_by_org_id=user["organization_id"],
         )
+        try:
+            with get_connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO encrypted_records
+                        (cti_record_id, ciphertext, policy_display, sensitivity, classification,
+                         encrypted_by_user_id, encrypted_by_org_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    record_id, "prrabe",
+                    policy_string, None, None,
+                    user["id"], user["organization_id"],
+                ))
+        except Exception:
+            pass
         incentive_engine.reward_share(user["organization_id"], record_id)
         if rec["confidence"] in ("high", "confirmed"):
             incentive_engine.reward_high_confidence(user["organization_id"], record_id)
@@ -855,7 +893,7 @@ def prrabe_decrypt():
     if not data or not data.get("record_id"):
         return error_response("record_id is required")
 
-    org_id = data.get("organization_id") or user["organization_id"]
+    org_id = user["organization_id"]
     try:
         result = prrabe_service.decrypt_record(org_id, data["record_id"])
         status_code = 200 if result.get("success") else 403
@@ -867,18 +905,24 @@ def prrabe_decrypt():
 @app.route("/api/prrabe/revoke", methods=["POST"])
 @require_auth
 def prrabe_revoke():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
     data = get_json_object()
-    if not data or not valid_positive_id(data.get("organization_id")):
-        return error_response("organization_id is required")
+    if not data:
+        return error_response("Send a valid JSON object")
+    org_id = data.get("organization_id", user["organization_id"])
+    if org_id != user["organization_id"]:
+        return error_response("You can only revoke attributes for your own organization", 403)
     attribute = data.get("attribute")
     if not attribute:
         return error_response("attribute is required (e.g. TRUST:HIGH)")
 
     try:
         result = prrabe_service.revoke_attribute(
-            data["organization_id"], attribute,
+            org_id, attribute,
         )
-        incentive_engine.penalize_revocation(data["organization_id"])
+        incentive_engine.penalize_revocation(org_id)
         return jsonify(result), 200
     except RuntimeError as e:
         return error_response(str(e), 500)
@@ -889,6 +933,52 @@ def prrabe_revoke():
 def prrabe_events():
     limit = request.args.get("limit", 50, type=int)
     return jsonify({"events": get_prrabe_events(limit)}), 200
+
+
+@app.route("/api/prrabe/demo-decrypt", methods=["POST"])
+@require_auth
+def prrabe_demo_decrypt():
+    """Demo-only: decrypt a record as a specified org to demonstrate revocation effects."""
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not data.get("record_id") or not data.get("organization_id"):
+        return error_response("record_id and organization_id are required")
+    org_id = data["organization_id"]
+    org = get_organization(org_id)
+    if not org:
+        return error_response("Organization not found", 404)
+    try:
+        result = prrabe_service.decrypt_record(org_id, data["record_id"])
+        result["demo_org_name"] = org["name"]
+        return jsonify(result), 200 if result.get("success") else 403
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/demo-revoke", methods=["POST"])
+@require_auth
+def prrabe_demo_revoke():
+    """Demo-only: revoke an attribute for any org to demonstrate AGK rotation."""
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data:
+        return error_response("Send a valid JSON object")
+    org_id = data.get("organization_id")
+    attribute = data.get("attribute")
+    if not org_id or not attribute:
+        return error_response("organization_id and attribute are required")
+    org = get_organization(org_id)
+    if not org:
+        return error_response("Organization not found", 404)
+    try:
+        result = prrabe_service.revoke_attribute(org_id, attribute)
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
 
 
 # --------------------------------------------------

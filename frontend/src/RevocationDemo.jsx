@@ -69,7 +69,7 @@ export default function RevocationDemo() {
     setDecryptResults({});
     const results = {};
     for (const org of (status?.orgs || [])) {
-      const res = await fetch(`${API_BASE_URL}/api/prrabe/decrypt`, {
+      const res = await fetch(`${API_BASE_URL}/api/prrabe/demo-decrypt`, {
         method: "POST", headers: hdrs(),
         body: JSON.stringify({ record_id: parseInt(encryptResult.record_id), organization_id: org.org_id }),
       });
@@ -83,7 +83,7 @@ export default function RevocationDemo() {
 
   const doDecryptOrg = async (orgId) => {
     setBusy(true);
-    const res = await fetch(`${API_BASE_URL}/api/prrabe/decrypt`, {
+    const res = await fetch(`${API_BASE_URL}/api/prrabe/demo-decrypt`, {
       method: "POST", headers: hdrs(),
       body: JSON.stringify({ record_id: parseInt(encryptResult.record_id), organization_id: orgId }),
     });
@@ -97,7 +97,7 @@ export default function RevocationDemo() {
     setBusy(true);
     flash("");
     setRevokeResult(null);
-    const res = await fetch(`${API_BASE_URL}/api/prrabe/revoke`, {
+    const res = await fetch(`${API_BASE_URL}/api/prrabe/demo-revoke`, {
       method: "POST", headers: hdrs(),
       body: JSON.stringify({ organization_id: parseInt(revokeOrgId), attribute: revokeAttr }),
     });
@@ -153,11 +153,16 @@ export default function RevocationDemo() {
             Access Policy (LSSS)
             <select value={selectedPolicy} onChange={e => setSelectedPolicy(e.target.value)}>
               <option value="">Select...</option>
-              <option value="(SECTOR:FINANCE AND TRUST:HIGH)">SECTOR:FINANCE AND TRUST:HIGH</option>
-              <option value="(SECTOR:FINANCE AND TRUST:MEDIUM)">SECTOR:FINANCE AND TRUST:MEDIUM</option>
-              <option value="(SECTOR:HEALTHCARE AND TRUST:HIGH)">SECTOR:HEALTHCARE AND TRUST:HIGH</option>
-              <option value="(TRUST:HIGH)">TRUST:HIGH (any sector)</option>
-              <option value="(TRUST:MEDIUM)">TRUST:MEDIUM (any sector)</option>
+              {(() => {
+                const sectors = [...new Set(orgList.map(o => (o.attributes || []).find(a => a.startsWith("SECTOR:"))?.split(":")[1]).filter(Boolean))];
+                const policies = [];
+                for (const s of sectors) {
+                  policies.push(`(SECTOR:${s} AND TRUST:HIGH)`);
+                  policies.push(`(SECTOR:${s} AND TRUST:MEDIUM)`);
+                }
+                policies.push("(TRUST:HIGH)", "(TRUST:MEDIUM)");
+                return policies.map(p => <option key={p} value={p}>{p.replace(/[()]/g, "")}</option>);
+              })()}
             </select>
           </label>
           <button className="rd-btn primary" onClick={doEncrypt} disabled={busy || !selectedRecord || !selectedPolicy}>
@@ -230,10 +235,14 @@ export default function RevocationDemo() {
             <label>
               Attribute to Revoke
               <select value={revokeAttr} onChange={e => setRevokeAttr(e.target.value)}>
-                <option value="TRUST:HIGH">TRUST:HIGH</option>
-                <option value="TRUST:MEDIUM">TRUST:MEDIUM</option>
-                <option value="SECTOR:FINANCE">SECTOR:FINANCE</option>
-                <option value="SECTOR:HEALTHCARE">SECTOR:HEALTHCARE</option>
+              {(() => {
+                const allAttrs = new Set();
+                orgList.forEach(o => (o.attributes || []).forEach(a => allAttrs.add(a)));
+                if (allAttrs.size === 0) {
+                  ["TRUST:HIGH", "TRUST:MEDIUM", "TRUST:LOW"].forEach(a => allAttrs.add(a));
+                }
+                return [...allAttrs].sort().map(a => <option key={a} value={a}>{a}</option>);
+              })()}
               </select>
             </label>
             <button className="rd-btn danger" onClick={doRevoke} disabled={busy || !revokeOrgId}>

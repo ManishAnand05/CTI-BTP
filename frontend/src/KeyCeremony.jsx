@@ -18,17 +18,23 @@ export default function KeyCeremony() {
   const [actionErr, setActionErr] = useState("");
   const [orgs, setOrgs] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [userOrg, setUserOrg] = useState(null);
 
   const load = useCallback(async () => {
     try {
-      const [statusRes, orgsRes] = await Promise.all([
+      const [statusRes, orgsRes, meRes] = await Promise.all([
         fetch(`${API_BASE_URL}/api/prrabe/status`, { headers: headers() }),
         fetch(`${API_BASE_URL}/api/organizations`, { headers: headers() }),
+        fetch(`${API_BASE_URL}/api/auth/me`, { headers: headers() }),
       ]);
       if (statusRes.ok) setStatus(await statusRes.json());
       if (orgsRes.ok) {
         const d = await orgsRes.json();
         setOrgs(d.organizations || []);
+      }
+      if (meRes.ok) {
+        const d = await meRes.json();
+        setUserOrg(d.organization || null);
       }
     } catch { /* ignore */ }
     setLoading(false);
@@ -160,12 +166,13 @@ export default function KeyCeremony() {
             {orgs.map(org => {
               const regInfo = (status?.orgs || []).find(o => o.org_id === org.id);
               const hasKey = regInfo?.has_key;
+              const isMyOrg = userOrg && org.id === userOrg.id;
               return (
                 <div key={org.id} className={`kc-org-card ${hasKey ? "keyed" : ""}`}>
                   <div className="kc-org-top">
                     <div className="kc-org-icon">{hasKey ? <CheckCircle2 size={20} /> : <Key size={20} />}</div>
                     <div>
-                      <strong>{org.name}</strong>
+                      <strong>{org.name}{isMyOrg ? " (You)" : ""}</strong>
                       <small>{org.sector} · Trust: {org.trust_score}</small>
                     </div>
                   </div>

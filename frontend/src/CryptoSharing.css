@@ -173,6 +173,8 @@
 }
 
 .crypto-status-bar span { white-space: nowrap; }
+.crypto-status-warn { background: #fff8ed; border-color: #fde68a; color: #92400e; }
+.crypto-hint { color: #d97706; font-size: 12px; margin: 4px 0 0; }
 
 .policy-box {
   margin-top: 16px;

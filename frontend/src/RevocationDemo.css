@@ -8,7 +8,7 @@
 .rd-flash.success { background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); color: #6ee7b7; }
 .rd-flash.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; }
 
-.rd-card { background: rgba(30, 27, 56, 0.5); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 14px; padding: 24px; margin-bottom: 16px; }
+.rd-card { background: rgba(30, 27, 56, 0.95); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 24px; margin-bottom: 16px; }
 .rd-card.revoke { border-color: rgba(239, 68, 68, 0.2); }
 .rd-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; color: #e2e8f0; }
 .rd-card-head h3 { margin: 0; font-size: 16px; }
@@ -33,7 +33,7 @@
 
 /* Org results */
 .rd-org-results { display: flex; flex-direction: column; gap: 8px; }
-.rd-org-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: rgba(15, 13, 35, 0.4); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; transition: border-color 0.2s; }
+.rd-org-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: rgba(15, 13, 35, 0.8); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; transition: border-color 0.2s; }
 .rd-org-row.granted { border-color: rgba(16, 185, 129, 0.3); }
 .rd-org-row.denied { border-color: rgba(239, 68, 68, 0.3); }
 .rd-org-info { display: flex; flex-direction: column; gap: 2px; }

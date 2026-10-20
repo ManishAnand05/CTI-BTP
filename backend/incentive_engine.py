@@ -43,7 +43,7 @@ def _transact(org_id, amount, reason, reference_id=None):
             "SELECT balance FROM incentive_wallet WHERE organization_id = ?",
             (org_id,),
         ).fetchone()
-        new_balance = round(wallet["balance"] + amount, 2)
+        new_balance = max(0, round(wallet["balance"] + amount, 2))
 
         if amount > 0:
             conn.execute(

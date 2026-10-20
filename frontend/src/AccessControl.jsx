@@ -61,10 +61,6 @@ export default function AccessControl() {
     loadData();
   }, []);
 
-  // This log will tell us if React has the data before rendering
-  console.log("Data loaded -> Organizations:", organizations);
-  console.log("Data loaded -> Records:", records);
-
   const handleEvaluate = async (e) => {
     e.preventDefault();
     if (!selectedOrg || !selectedRecord) return;

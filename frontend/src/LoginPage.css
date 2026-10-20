@@ -349,6 +349,84 @@
 }
 
 /* ==========================================================
+   Organization picker
+   ========================================================== */
+
+.login-org-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 8px;
+  background: var(--lp-canvas);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.login-org-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lp-muted);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.login-org-tab.is-active {
+  background: var(--lp-surface);
+  color: var(--lp-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.login-org-select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--lp-border);
+  border-radius: 8px;
+  background: var(--lp-surface);
+  color: var(--lp-ink);
+  font: inherit;
+  font-size: 14px;
+}
+
+.login-org-select:focus {
+  outline: 2px solid var(--lp-primary-soft);
+  border-color: var(--lp-primary);
+}
+
+.login-org-new {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.login-org-new input,
+.login-org-new select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--lp-border);
+  border-radius: 8px;
+  background: var(--lp-surface);
+  color: var(--lp-ink);
+  font: inherit;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.login-org-new input:focus,
+.login-org-new select:focus {
+  outline: 2px solid var(--lp-primary-soft);
+  border-color: var(--lp-primary);
+}
+
+/* ==========================================================
    Submit button
    ========================================================== */
 

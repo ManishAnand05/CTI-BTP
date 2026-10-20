@@ -100,7 +100,8 @@ def compute_trust_score(org_id):
     )
     trust = max(0, min(100, trust))
 
-    _persist(get_connection(), org_id, trust)
+    with get_connection() as conn:
+        _persist(conn, org_id, trust)
     _notify_policy_engine(org_id, trust)
 
     return {

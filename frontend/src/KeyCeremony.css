@@ -12,7 +12,7 @@
 .kc-flash.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; }
 
 /* Stepper */
-.kc-stepper { display: flex; align-items: center; gap: 4px; margin-bottom: 24px; padding: 16px; background: rgba(30, 27, 56, 0.6); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.06); }
+.kc-stepper { display: flex; align-items: center; gap: 4px; margin-bottom: 24px; padding: 16px; background: rgba(30, 27, 56, 0.95); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.06); }
 .kc-step { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px; font-size: 13px; color: #64748b; transition: all 0.2s; }
 .kc-step-num { width: 26px; height: 26px; border-radius: 50%; background: rgba(100, 116, 139, 0.2); display: grid; place-items: center; font-size: 12px; font-weight: 700; }
 .kc-step.active { color: #a78bfa; background: rgba(167, 139, 250, 0.1); }
@@ -22,7 +22,7 @@
 .kc-step-arrow { color: #475569; flex-shrink: 0; }
 
 /* Cards */
-.kc-card { background: rgba(30, 27, 56, 0.5); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 14px; padding: 24px; margin-bottom: 16px; transition: border-color 0.2s; }
+.kc-card { background: rgba(30, 27, 56, 0.95); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 14px; padding: 24px; margin-bottom: 16px; transition: border-color 0.2s; }
 .kc-card.highlight { border-color: rgba(167, 139, 250, 0.3); }
 .kc-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; color: #e2e8f0; }
 .kc-card-head h3 { margin: 0; font-size: 16px; flex: 1; }
@@ -46,7 +46,7 @@
 
 /* Org grid */
 .kc-org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-bottom: 16px; }
-.kc-org-card { background: rgba(15, 13, 35, 0.5); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 16px; transition: border-color 0.2s; }
+.kc-org-card { background: rgba(15, 13, 35, 0.9); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 16px; transition: border-color 0.2s; }
 .kc-org-card.keyed { border-color: rgba(16, 185, 129, 0.3); }
 .kc-org-top { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .kc-org-icon { width: 40px; height: 40px; border-radius: 10px; background: rgba(167, 139, 250, 0.1); display: grid; place-items: center; color: #a78bfa; }

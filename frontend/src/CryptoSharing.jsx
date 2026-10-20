@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
-import { Lock, Unlock, ShieldOff, ShieldCheck, Key, FileKey, Activity, Shield, Database, Eye } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Lock, Unlock, ShieldOff, ShieldCheck, Key, FileKey, Activity, Shield, Database, Eye, AlertTriangle, CheckCircle } from "lucide-react";
 import { API_BASE_URL, getAccessToken } from "./api";
 import "./CryptoSharing.css";
 
@@ -10,23 +10,21 @@ export default function CryptoSharing() {
   const [selectedRecord, setSelectedRecord] = useState("");
   const [selectedEncrypted, setSelectedEncrypted] = useState("");
 
-  const [generatedPolicy, setGeneratedPolicy] = useState("");
   const [decryptedData, setDecryptedData] = useState(null);
   const [decryptMeta, setDecryptMeta] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [encryptMsg, setEncryptMsg] = useState("");
 
-  const [policySector, setPolicySector] = useState("Finance");
-  const [isRevoked, setIsRevoked] = useState(false);
-  const [cryptoStatus, setCryptoStatus] = useState(null);
+  const [policySector, setPolicySector] = useState("All");
+  const [prrabeStatus, setPrrabeStatus] = useState(null);
   const [trustInfo, setTrustInfo] = useState(null);
-  const [encryptMeta, setEncryptMeta] = useState(null);
+  const [loading, setLoading] = useState({ encrypt: false, decrypt: false, revoke: false });
 
   const token = getAccessToken();
   const headers = { Authorization: `Bearer ${token}` };
   const jsonHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
-  async function loadEncryptedRecords() {
+  const loadEncryptedRecords = useCallback(async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/crypto/encrypted`, { headers });
       if (res.ok) {
@@ -34,29 +32,33 @@ export default function CryptoSharing() {
         setEncryptedRecords(data.records || []);
       }
     } catch { /* ignore */ }
-  }
+  }, [token]);
 
   useEffect(() => {
     async function loadData() {
-      const [meRes, ctiRes, statusRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/auth/me`, { headers }),
-        fetch(`${API_BASE_URL}/api/cti/advanced`, { headers }),
-        fetch(`${API_BASE_URL}/api/crypto/status`, { headers }).catch(() => null),
-      ]);
+      try {
+        const [meRes, ctiRes, statusRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/auth/me`, { headers }),
+          fetch(`${API_BASE_URL}/api/cti/advanced`, { headers }),
+          fetch(`${API_BASE_URL}/api/prrabe/status`, { headers }).catch(() => null),
+        ]);
 
-      if (meRes.ok) {
-        const meData = await meRes.json();
-        setUserOrg(meData.organization || null);
-      }
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          setUserOrg(meData.organization || null);
+        }
 
-      const ctiData = await ctiRes.json();
-      setCtiRecords(ctiData.records || (Array.isArray(ctiData) ? ctiData : []));
+        if (ctiRes.ok) {
+          const ctiData = await ctiRes.json();
+          setCtiRecords(ctiData.records || (Array.isArray(ctiData) ? ctiData : []));
+        }
 
-      if (statusRes && statusRes.ok) {
-        setCryptoStatus(await statusRes.json());
-      }
+        if (statusRes && statusRes.ok) {
+          setPrrabeStatus(await statusRes.json());
+        }
 
-      await loadEncryptedRecords();
+        await loadEncryptedRecords();
+      } catch { /* ignore */ }
     }
     loadData();
   }, []);
@@ -64,48 +66,51 @@ export default function CryptoSharing() {
   useEffect(() => {
     if (!userOrg) { setTrustInfo(null); return; }
     async function loadTrust() {
-      const res = await fetch(`${API_BASE_URL}/api/trust/compute/${userOrg.id}`, { headers });
-      if (res.ok) setTrustInfo(await res.json());
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/trust/compute/${userOrg.id}`, { headers });
+        if (res.ok) setTrustInfo(await res.json());
+      } catch { /* ignore */ }
     }
     loadTrust();
   }, [userOrg]);
 
+  const ceremonyReady = prrabeStatus?.aggregated === true;
   const selectedCTI = ctiRecords.find(r => r.id === parseInt(selectedRecord));
   const selectedEnc = encryptedRecords.find(r => r.id === parseInt(selectedEncrypted));
 
+  const userOrgRegistered = prrabeStatus?.orgs?.some(o => o.org_id === userOrg?.id);
+
   const handleEncrypt = async () => {
-    if (!selectedCTI) return;
+    if (!selectedCTI || !ceremonyReady) return;
+    setLoading(l => ({ ...l, encrypt: true }));
+    setEncryptMsg("");
 
-    const fullRecord = {
-      id: selectedCTI.id,
-      title: selectedCTI.title,
-      indicator_type: selectedCTI.indicator_type,
-      indicator_value: selectedCTI.indicator_value,
-      category: selectedCTI.category,
-      severity: selectedCTI.severity,
-      confidence: selectedCTI.confidence,
-      risk_level: selectedCTI.risk_level,
-      risk_score: selectedCTI.risk_score,
-      description: selectedCTI.description,
-      sharing_sector: selectedCTI.sharing_sector,
-      stix_bundle: selectedCTI.stix_data ? (typeof selectedCTI.stix_data === "string" ? JSON.parse(selectedCTI.stix_data) : selectedCTI.stix_data) : null,
-    };
+    try {
+      const body = { record_id: selectedCTI.id };
+      if (policySector !== "All") {
+        body.policy = `SECTOR:${policySector.toUpperCase()}`;
+      }
 
-    const res = await fetch(`${API_BASE_URL}/api/crypto/encrypt`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({
-        record: fullRecord,
-        policy: { sector: policySector, min_trust: selectedCTI.severity === "critical" || selectedCTI.severity === "high" ? 80 : 50 },
-        auto_policy: true,
-      }),
-    });
-    const data = await res.json();
-    setGeneratedPolicy(data.generated_policy || "");
-    setEncryptMeta(data.sensitivity ? { sensitivity: data.sensitivity, classification: data.classification } : null);
-    setEncryptMsg(`Encrypted and stored successfully. Policy: ${data.generated_policy || "default"}`);
+      const res = await fetch(`${API_BASE_URL}/api/prrabe/encrypt`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
 
-    await loadEncryptedRecords();
+      if (res.ok) {
+        setEncryptMsg(`Encrypted with PR-RABE. Policy: ${data.policy || "default"}. Took ${data.elapsed_ms}ms.`);
+        await loadEncryptedRecords();
+        const statusRes = await fetch(`${API_BASE_URL}/api/prrabe/status`, { headers });
+        if (statusRes.ok) setPrrabeStatus(await statusRes.json());
+      } else {
+        setEncryptMsg(`Encryption failed: ${data.error || "Unknown error"}`);
+      }
+    } catch (e) {
+      setEncryptMsg(`Encryption failed: ${e.message}`);
+    } finally {
+      setLoading(l => ({ ...l, encrypt: false }));
+    }
   };
 
   const handleDecrypt = async () => {
@@ -113,65 +118,93 @@ export default function CryptoSharing() {
     setDecryptedData(null);
     setDecryptMeta(null);
     setErrorMsg("");
+    setLoading(l => ({ ...l, decrypt: true }));
 
-    const res = await fetch(`${API_BASE_URL}/api/crypto/decrypt`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ encrypted_record_id: selectedEnc.id }),
-    });
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/prrabe/decrypt`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ record_id: selectedEnc.cti_record_id }),
+      });
 
-    const data = await res.json();
-    if (res.ok && data.success) {
-      setDecryptedData(data.data);
-      setDecryptMeta({ trust_score: data.trust_score, policy: data.policy, encrypted_at: data.encrypted_at });
-      setErrorMsg("");
-    } else {
-      setDecryptedData(null);
-      setDecryptMeta(null);
-      setErrorMsg(data.reason || "Access denied.");
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDecryptedData(data.data);
+        setDecryptMeta({
+          org_name: data.org_name,
+          attributes: data.attributes,
+          elapsed_ms: data.elapsed_ms,
+        });
+      } else {
+        setErrorMsg(data.reason || data.error || "Access denied — your attributes do not satisfy the policy.");
+      }
+    } catch (e) {
+      setErrorMsg(`Decryption failed: ${e.message}`);
+    } finally {
+      setLoading(l => ({ ...l, decrypt: false }));
     }
   };
 
   const handleRevoke = async () => {
     if (!userOrg) return;
-    await fetch(`${API_BASE_URL}/api/crypto/revoke`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ organization_id: userOrg.id, action: isRevoked ? "restore" : "revoke" }),
-    });
-    setIsRevoked(!isRevoked);
-    setDecryptedData(null);
-    setDecryptMeta(null);
-    setErrorMsg("");
-    const [trustRes, statusRes] = await Promise.all([
-      fetch(`${API_BASE_URL}/api/trust/compute/${userOrg.id}`, { headers }),
-      fetch(`${API_BASE_URL}/api/crypto/status`, { headers }),
-    ]);
-    if (trustRes.ok) setTrustInfo(await trustRes.json());
-    if (statusRes.ok) setCryptoStatus(await statusRes.json());
+    setLoading(l => ({ ...l, revoke: true }));
+
+    const trustAttr = trustInfo
+      ? `TRUST:${trustInfo.trust_level?.toUpperCase() || "MEDIUM"}`
+      : "TRUST:MEDIUM";
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/prrabe/revoke`, {
+        method: "POST",
+        headers: jsonHeaders,
+        body: JSON.stringify({ attribute: trustAttr }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        setErrorMsg("");
+        setDecryptedData(null);
+        setDecryptMeta(null);
+        setEncryptMsg(`Revoked: ${trustAttr}. AGK rotated to v${data.new_agk_version}. ${data.records_reencrypted} record(s) re-encrypted.`);
+        const statusRes = await fetch(`${API_BASE_URL}/api/prrabe/status`, { headers });
+        if (statusRes.ok) setPrrabeStatus(await statusRes.json());
+      } else {
+        setErrorMsg(data.error || "Revocation failed");
+      }
+    } catch (e) {
+      setErrorMsg(`Revocation failed: ${e.message}`);
+    } finally {
+      setLoading(l => ({ ...l, revoke: false }));
+    }
   };
 
   return (
     <div className="crypto-page">
       <div className="crypto-header">
         <h2>Privacy-Preserving CTI Sharing (PR-RABE)</h2>
-        <p>Encrypt threat intelligence with attribute-based policies. Other organizations attempt decryption — access is granted or denied based on their trust level, sector, and revocation status.</p>
+        <p>Encrypt threat intelligence with real attribute-based encryption using bilinear pairings. Access is granted or denied based on cryptographic policy evaluation — no trusted authority decides.</p>
       </div>
 
-      {cryptoStatus && (
-        <div className="crypto-status-bar">
+      {prrabeStatus && (
+        <div className={`crypto-status-bar ${ceremonyReady ? "" : "crypto-status-warn"}`}>
           <Shield size={16} />
-          <span><strong>Engine:</strong> {cryptoStatus.engine}</span>
-          <span><strong>Policy:</strong> {cryptoStatus.policy_type}</span>
-          <span><strong>Revoked Orgs:</strong> {cryptoStatus.revoked_organizations}</span>
+          <span><strong>PR-RABE:</strong> {ceremonyReady ? "Ready" : prrabeStatus.initialized ? "Ceremony incomplete" : "Not initialized"}</span>
+          <span><strong>Registered:</strong> {prrabeStatus.registered}/{prrabeStatus.num_slots} orgs</span>
+          <span><strong>Encrypted:</strong> {prrabeStatus.encrypted_records} records</span>
+          {!ceremonyReady && (
+            <span style={{ color: "#f59e0b" }}>
+              <AlertTriangle size={14} style={{ verticalAlign: "middle" }} /> Complete the Key Ceremony first
+            </span>
+          )}
         </div>
       )}
 
       {userOrg && (
         <div className="crypto-status-bar" style={{ background: "rgba(56, 189, 248, 0.08)", borderColor: "rgba(56, 189, 248, 0.2)" }}>
           <Database size={16} />
-          <span><strong>Logged in as:</strong> {userOrg.name} ({userOrg.sector})</span>
+          <span><strong>Your Org:</strong> {userOrg.name} ({userOrg.sector})</span>
           <span><strong>Trust:</strong> {userOrg.trust_score}/100</span>
+          {userOrgRegistered && <span style={{ color: "#6ee7b7" }}><CheckCircle size={14} /> Keys registered</span>}
         </div>
       )}
 
@@ -180,13 +213,13 @@ export default function CryptoSharing() {
         <div className="crypto-card">
           <div className="crypto-panel-heading">
             <Lock size={20} />
-            <h3>1. Encrypt & Publish CTI Record</h3>
+            <h3>1. Encrypt & Share CTI Record</h3>
           </div>
 
           <div className="crypto-form">
             <label>
               CTI Record to Encrypt
-              <select value={selectedRecord} onChange={e => { setSelectedRecord(e.target.value); setEncryptMsg(""); setGeneratedPolicy(""); }}>
+              <select value={selectedRecord} onChange={e => { setSelectedRecord(e.target.value); setEncryptMsg(""); }}>
                 <option value="">Select a threat record...</option>
                 {ctiRecords.map(r => (
                   <option key={r.id} value={r.id}>
@@ -214,38 +247,34 @@ export default function CryptoSharing() {
             )}
 
             <label>
-              Sector Restriction
+              Policy — Sector Restriction
               <select value={policySector} onChange={e => setPolicySector(e.target.value)}>
-                <option value="All">All Sectors</option>
-                <option value="Finance">Finance</option>
-                <option value="Healthcare">Healthcare</option>
-                <option value="Education">Education</option>
-                <option value="Technology">Technology</option>
-                <option value="Government">Government</option>
-                <option value="Energy">Energy</option>
+                <option value="All">Auto (based on severity)</option>
+                <option value="Finance">SECTOR:FINANCE</option>
+                <option value="Healthcare">SECTOR:HEALTHCARE</option>
+                <option value="Education">SECTOR:EDUCATION</option>
+                <option value="Technology">SECTOR:TECHNOLOGY</option>
+                <option value="Government">SECTOR:GOVERNMENT</option>
+                <option value="Energy">SECTOR:ENERGY</option>
               </select>
             </label>
 
-            <button className="crypto-btn primary" onClick={handleEncrypt} disabled={!selectedRecord}>
-              <FileKey size={16} /> Encrypt with PR-RABE
+            <button
+              className="crypto-btn primary"
+              onClick={handleEncrypt}
+              disabled={!selectedRecord || !ceremonyReady || loading.encrypt}
+            >
+              <FileKey size={16} /> {loading.encrypt ? "Encrypting..." : "Encrypt with PR-RABE"}
             </button>
+
+            {!ceremonyReady && selectedRecord && (
+              <p className="crypto-hint">Complete the Key Ceremony before encrypting.</p>
+            )}
           </div>
 
           {encryptMsg && (
             <div className="policy-box">
               <p><strong>{encryptMsg}</strong></p>
-              {generatedPolicy && (
-                <div>
-                  <p style={{ marginTop: "8px" }}><strong>LSSS Policy:</strong></p>
-                  <code>{generatedPolicy}</code>
-                </div>
-              )}
-              {encryptMeta && (
-                <div style={{ marginTop: "8px", fontSize: "13px", color: "#8899aa" }}>
-                  <strong>Sensitivity:</strong> {encryptMeta.sensitivity} &nbsp;|&nbsp;
-                  <strong>Classification:</strong> {encryptMeta.classification.join("; ")}
-                </div>
-              )}
             </div>
           )}
         </div>
@@ -254,13 +283,13 @@ export default function CryptoSharing() {
         <div className="crypto-card">
           <div className="crypto-panel-heading">
             <Unlock size={20} />
-            <h3>2. Decrypt Encrypted Record</h3>
+            <h3>2. Decrypt Shared Intelligence</h3>
           </div>
 
           <div className="crypto-form">
             {userOrg ? (
               <div className="org-auto-bound">
-                <strong>Your Organization:</strong> {userOrg.name} ({userOrg.sector})
+                <strong>Decrypting as:</strong> {userOrg.name} ({userOrg.sector})
               </div>
             ) : (
               <div className="org-auto-bound" style={{ color: "#ef4444" }}>
@@ -274,7 +303,7 @@ export default function CryptoSharing() {
                 <span>
                   <strong>Dynamic Trust:</strong> {trustInfo.trust_score}/100 ({trustInfo.trust_level})
                 </span>
-                {trustInfo.components && trustInfo.components.sharing && (
+                {trustInfo.components?.sharing && (
                   <div className="trust-breakdown">
                     <small>Sharing: {trustInfo.components.sharing.submissions} submissions | Violations: {trustInfo.components.violations.count} | Reliability: {trustInfo.components.reliability.score}%</small>
                   </div>
@@ -301,27 +330,38 @@ export default function CryptoSharing() {
                   <strong>Encrypted Record Details</strong>
                 </div>
                 <div className="record-preview-body">
-                  <div><strong>Original Title:</strong> {selectedEnc.title}</div>
+                  <div><strong>Title:</strong> {selectedEnc.title}</div>
                   <div><strong>Severity:</strong> <span className={`sev-badge sev-${selectedEnc.severity}`}>{selectedEnc.severity}</span></div>
                   <div><strong>Category:</strong> {selectedEnc.category}</div>
                   <div><strong>Sector:</strong> {selectedEnc.sharing_sector}</div>
-                  <div><strong>Policy:</strong> <code>{selectedEnc.policy_display}</code></div>
-                  {selectedEnc.sensitivity && <div><strong>Sensitivity:</strong> {selectedEnc.sensitivity}</div>}
+                  <div><strong>LSSS Policy:</strong> <code>{selectedEnc.policy_display}</code></div>
                   <div><strong>Encrypted by:</strong> {selectedEnc.encrypted_by_org}</div>
-                  <div><strong>Encrypted at:</strong> {new Date(selectedEnc.created_at).toLocaleString()}</div>
+                  <div><strong>At:</strong> {new Date(selectedEnc.created_at).toLocaleString()}</div>
                 </div>
               </div>
             )}
 
             <div className="crypto-actions">
-              <button className="crypto-btn success" onClick={handleDecrypt} disabled={!selectedEnc || !userOrg}>
-                <Key size={16} /> Attempt Decryption
+              <button
+                className="crypto-btn success"
+                onClick={handleDecrypt}
+                disabled={!selectedEnc || !userOrg || !ceremonyReady || loading.decrypt}
+              >
+                <Key size={16} /> {loading.decrypt ? "Decrypting..." : "Attempt Decryption"}
               </button>
 
-              <button className={`crypto-btn ${isRevoked ? "warning" : "danger"}`} onClick={handleRevoke} disabled={!userOrg}>
-                <ShieldOff size={16} /> {isRevoked ? "Restore Access" : "Revoke Keys (AGK Rotation)"}
+              <button
+                className="crypto-btn danger"
+                onClick={handleRevoke}
+                disabled={!userOrg || !ceremonyReady || loading.revoke}
+              >
+                <ShieldOff size={16} /> {loading.revoke ? "Revoking..." : "Revoke My Keys (AGK Rotation)"}
               </button>
             </div>
+
+            {!ceremonyReady && (
+              <p className="crypto-hint">Complete the Key Ceremony before decrypting or revoking.</p>
+            )}
           </div>
 
           {errorMsg && (
@@ -337,7 +377,11 @@ export default function CryptoSharing() {
               </div>
               {decryptMeta && (
                 <div className="decrypt-meta">
-                  <small>Trust Score: {decryptMeta.trust_score} | Policy: {decryptMeta.policy} | Encrypted: {decryptMeta.encrypted_at}</small>
+                  <small>
+                    Decrypted as: {decryptMeta.org_name} |
+                    Attributes: {decryptMeta.attributes?.join(", ")} |
+                    Time: {decryptMeta.elapsed_ms}ms
+                  </small>
                 </div>
               )}
               <div className="decrypted-intel">
@@ -355,25 +399,6 @@ export default function CryptoSharing() {
                   <div className="intel-description">
                     <span className="intel-label">Description</span>
                     <p>{decryptedData.description}</p>
-                  </div>
-                )}
-                {decryptedData.stix_bundle && (
-                  <div className="intel-stix">
-                    <span className="intel-label">STIX 2.1 Bundle ({decryptedData.stix_bundle.objects?.length || 0} objects)</span>
-                    <div className="stix-objects">
-                      {(decryptedData.stix_bundle.objects || []).map((obj, i) => (
-                        <div key={i} className="stix-object">
-                          <div className="stix-object-type">{obj.type}</div>
-                          <div className="stix-object-name">{obj.name || obj.id}</div>
-                          {obj.description && <div className="stix-object-desc">{obj.description}</div>}
-                          {obj.pattern && <div className="stix-object-pattern"><code>{obj.pattern}</code></div>}
-                          {obj.malware_types && <div className="stix-object-tags">{obj.malware_types.join(", ")}</div>}
-                          {obj.labels && <div className="stix-object-tags">{obj.labels.join(", ")}</div>}
-                          {obj.number_observed && <div className="stix-object-tags">{obj.number_observed} observations</div>}
-                          {obj.sectors && <div className="stix-object-tags">Sectors: {obj.sectors.join(", ")}</div>}
-                        </div>
-                      ))}
-                    </div>
                   </div>
                 )}
               </div>

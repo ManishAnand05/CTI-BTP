@@ -17,11 +17,13 @@ import ATTACKNavigator from './ATTACKNavigator.jsx'
 import KeyCeremony from './KeyCeremony.jsx'
 import RevocationDemo from './RevocationDemo.jsx'
 import IncentiveWallet from './IncentiveWallet.jsx'
+import CTISubmissionForm from './CTISubmissionForm.jsx'
 import './App.css'
 
 // GLOBAL navigation (when no org is selected)
 const GLOBAL_NAV = [
   { label: 'Overview', icon: LayoutDashboard },
+  { label: 'Submit CTI', icon: Plus },
   { label: 'Organizations', icon: Building2 },
   { label: 'Key Ceremony', icon: Key },
   { label: 'Crypto Sharing', icon: ShieldCheck },
@@ -216,6 +218,17 @@ function App() {
   useEffect(() => {
     if (!authenticated) return undefined
     loadDashboard()
+    if (!user) {
+      const token = getAccessToken()
+      if (token) {
+        fetch(`${API_BASE_URL}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+          .then(r => r.ok ? r.json() : null)
+          .then(d => { if (d?.user) setUser(d.user) })
+          .catch(() => {})
+      }
+    }
     return () => { requestId.current += 1 }
   }, [authenticated, loadDashboard])
 
@@ -334,6 +347,7 @@ function App() {
       }
     : {
         Overview: () => <DashboardOverview records={records} organizations={organizations} />,
+        'Submit CTI': () => <CTISubmissionForm />,
         Organizations: renderOrganizations,
         'Key Ceremony': () => <KeyCeremony />,
         'Crypto Sharing': () => <CryptoSharing />,
@@ -436,6 +450,7 @@ function App() {
               <span style={{ fontSize: '12px', fontWeight: 600 }}>Logout</span>
             </button>
             <div className="avatar" title={user?.name || user?.email || ''}>{userInitial}</div>
+            {user && <span style={{ fontSize: '11px', color: '#77758e', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</span>}
           </div>
         </header>
 
