@@ -98,12 +98,19 @@ export default function AccessControl() {
         throw new Error(data.error || `Server error (HTTP ${res.status})`);
       }
 
-      const isGranted = data.decision === "allow" || data.decision === "granted" || data.allowed === true || data.decision === "ALLOW";
-      
+      const decisionVal = (data.decision || "").toUpperCase();
+      const isGranted = decisionVal === "ALLOW" || decisionVal === "GRANTED" || data.allowed === true;
+
       setDecision({
         granted: isGranted,
         reason: data.reason || (isGranted ? "Policy requirements met." : "Policy requirements not met."),
-        details: data.policy || data.details || {}
+        details: data.policy || data.details || {},
+        trust_score: data.trust_score,
+        trust_level: data.trust_level,
+        trust_components: data.trust_components,
+        lsss_policy: data.lsss_policy,
+        risk_level: data.risk_level,
+        risk_score: data.risk_score,
       });
 
       const logRes = await fetch(`${API_BASE_URL}/api/audit-logs`, { headers: { Authorization: `Bearer ${token}` } });
@@ -172,17 +179,27 @@ export default function AccessControl() {
                 <h3>{decision.granted ? "ACCESS GRANTED" : "ACCESS DENIED"}</h3>
               </div>
               <p className="ac-reason">{decision.reason}</p>
-              
-              {Object.keys(decision.details).length > 0 && (
-                <div className="ac-details">
-                  <h4>Policy Context:</h4>
-                  <ul>
-                    {Object.entries(decision.details).map(([k, v]) => (
-                      <li key={k}><strong>{k}:</strong> {String(v)}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+
+              <div className="ac-details">
+                <h4>Access Decision Context:</h4>
+                <ul>
+                  {decision.trust_score !== undefined && (
+                    <li><strong>Dynamic Trust Score:</strong> {decision.trust_score}/100 ({decision.trust_level})</li>
+                  )}
+                  {decision.lsss_policy && (
+                    <li><strong>LSSS Policy:</strong> <code>{decision.lsss_policy}</code></li>
+                  )}
+                  {decision.risk_level && (
+                    <li><strong>Risk Level:</strong> {decision.risk_level} (score: {decision.risk_score})</li>
+                  )}
+                  {decision.trust_components && decision.trust_components.sharing && (
+                    <li><strong>Trust Breakdown:</strong> Sharing={decision.trust_components.sharing.score} ({decision.trust_components.sharing.submissions} submissions), Violations={decision.trust_components.violations.count}, Reliability={decision.trust_components.reliability.score}%</li>
+                  )}
+                  {Object.entries(decision.details).map(([k, v]) => (
+                    <li key={k}><strong>{k}:</strong> {String(v)}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
           )}
         </div>

@@ -5,7 +5,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.crypto_engine import encrypt_payload, decrypt_payload, revoke_access, restore_access
+from backend.crypto_engine import encrypt_payload, decrypt_payload, revoke_access, restore_access, get_system_status
+from backend.trust_engine import compute_trust_score, generate_policy_string
 import ipaddress
 import json
 import re
@@ -494,7 +495,8 @@ def advanced_access_policy():
             with get_connection() as conn:
                 org = conn.execute("SELECT name FROM organizations WHERE id = ?", (data["organization_id"],)).fetchone()
                 rec = conn.execute("SELECT indicator_value FROM cti_records WHERE id = ?", (data["record_id"],)).fetchone()
-                is_granted = result.get("decision") in ["allow", "granted"] or result.get("allowed") == True
+                decision_val = (result.get("decision") or "").upper()
+                is_granted = decision_val in ["ALLOW", "GRANTED"] or result.get("allowed") is True
                 conn.execute("INSERT INTO audit_logs (organization_name, record_value, decision, reason, timestamp) VALUES (?, ?, ?, ?, ?)",
                     (org["name"] if org else "Unknown", rec["indicator_value"] if rec else "Unknown", "GRANTED" if is_granted else "DENIED", result.get("reason", ""), datetime.now().isoformat()))
                 conn.commit()
@@ -541,12 +543,60 @@ def auth_login():
         return jsonify({"message": "Login successful", "access_token": create_access_token(user["id"]), "token_type": "Bearer", "user": public_user(user)}), 200
     except Exception: return error_response("Login failed", 500)
 
+@app.route("/api/crypto/status", methods=["GET"])
+@require_auth
+def crypto_status():
+    try:
+        return jsonify(get_system_status()), 200
+    except Exception as e:
+        return error_response(f"Crypto status failed: {str(e)}", 500)
+
+@app.route("/api/trust/compute/<int:org_id>", methods=["GET"])
+@require_auth
+def get_dynamic_trust(org_id):
+    result = compute_trust_score(org_id)
+    if result is None:
+        return error_response("Organization not found", 404)
+    return jsonify(result), 200
+
+@app.route("/api/trust/compute-all", methods=["GET"])
+@require_auth
+def compute_all_trust():
+    try:
+        orgs = get_all_organizations()
+        results = []
+        for org in orgs:
+            t = compute_trust_score(org["id"])
+            if t:
+                results.append(t)
+        return jsonify({"count": len(results), "trust_scores": results}), 200
+    except Exception as e:
+        return error_response(f"Trust computation failed: {str(e)}", 500)
+
 @app.route("/api/crypto/encrypt", methods=["POST", "OPTIONS"])
 def crypto_encrypt():
     if request.method == "OPTIONS": return jsonify({}), 200
     if not current_user(): return error_response("Authentication required", 401)
     data = get_json_object()
-    return jsonify({"ciphertext": encrypt_payload(data.get("record"), data.get("policy", {}))}), 200
+    if not data:
+        return error_response("Send a valid JSON object")
+
+    record = data.get("record", {})
+    policy = data.get("policy", {})
+
+    if data.get("auto_policy"):
+        severity = record.get("severity", "low")
+        sector = policy.get("sector", "All")
+        policy_string = generate_policy_string(severity, sector)
+    else:
+        policy_string = None
+
+    ciphertext = encrypt_payload(record, policy_string if policy_string else policy)
+
+    result = {"ciphertext": ciphertext}
+    if policy_string:
+        result["generated_policy"] = policy_string
+    return jsonify(result), 200
 
 @app.route("/api/crypto/decrypt", methods=["POST", "OPTIONS"])
 def crypto_decrypt():

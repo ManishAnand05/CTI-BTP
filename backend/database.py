@@ -163,6 +163,33 @@ def initialize_database():
             ON users(organization_id)
         """)
 
+        # 7. Create the audit_logs table for security audit trail.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_name TEXT NOT NULL,
+                record_value TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 8. Create revoked_organizations table for persistent revocation.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS revoked_organizations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL UNIQUE,
+                revoked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                key_version INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp
+            ON audit_logs(timestamp)
+        """)
+
 
 # --------------------------------------------------
 # LEGACY CTI INDICATORS

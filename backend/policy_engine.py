@@ -3,6 +3,7 @@ from backend.risk_analysis import (
     calculate_risk,
     calculate_advanced_risk,
 )
+from backend.trust_engine import compute_trust_score, generate_policy_string
 
 
 def generate_access_policy(organization_id, indicator_id):
@@ -155,18 +156,25 @@ def _evaluate_access(
 
     organization_id = organization["id"]
     organization_sector = organization["sector"]
-    trust_score = organization["trust_score"]
     policy_violations = organization["policy_violations"]
     is_active = bool(organization["is_active"])
+
+    trust_result = compute_trust_score(organization_id)
+    trust_score = trust_result["trust_score"] if trust_result else organization["trust_score"]
+
+    lsss_policy = generate_policy_string(risk_level, indicator_sector)
 
     response = {
         "organization_id": organization_id,
         "indicator_id": record_id,
         "record_type": record_type,
         "trust_score": trust_score,
+        "trust_level": trust_result["trust_level"] if trust_result else "unknown",
+        "trust_components": trust_result.get("components") if trust_result else {},
         "risk_score": risk_score,
         "risk_level": risk_level,
         "sharing_sector": indicator_sector,
+        "lsss_policy": lsss_policy,
         "organization_active": is_active,
     }
 

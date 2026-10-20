@@ -160,6 +160,59 @@
   overflow-x: auto;
 }
 
+.crypto-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: #f0f0ff;
+  border: 1px solid #e0dfef;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #45435f;
+}
+
+.crypto-status-bar span { white-space: nowrap; }
+
+.policy-box {
+  margin-top: 16px;
+  padding: 12px;
+  background: #f8f7ff;
+  border: 1px solid #e0dfef;
+  border-radius: 8px;
+}
+
+.policy-box p { margin: 0 0 6px 0; font-size: 12px; color: #45435f; }
+.policy-box code { font-size: 13px; color: #7062e8; font-weight: 600; }
+
+.ciphertext-meta { color: #71717a; font-size: 11px; margin-top: 6px; }
+
+.trust-info-box {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #168568;
+}
+
+.trust-breakdown {
+  width: 100%;
+  color: #45435f;
+  padding-top: 4px;
+  border-top: 1px solid #d1fae5;
+}
+
+.decrypt-meta {
+  margin-bottom: 8px;
+  color: #45435f;
+  font-size: 12px;
+}
+
 @media (max-width: 900px) {
   .crypto-grid { grid-template-columns: 1fr; }
 }
