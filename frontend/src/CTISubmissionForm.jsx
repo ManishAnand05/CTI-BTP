@@ -1,13 +1,12 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   FilePlus2,
   ShieldCheck,
   AlertCircle,
   LoaderCircle,
 } from 'lucide-react'
+import { API_BASE_URL, getAccessToken } from './api'
 import './CTISubmissionForm.css'
-
-const ORGANIZATION_ID = 1
 
 const initialForm = {
   title: '',
@@ -23,10 +22,22 @@ const initialForm = {
   description: '',
 }
 
-function CTISubmissionForm({ onSubmit, submitting = false }) {
+function CTISubmissionForm() {
   const [form, setForm] = useState(initialForm)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [userOrg, setUserOrg] = useState(null)
+
+  useEffect(() => {
+    const token = getAccessToken()
+    fetch(`${API_BASE_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.organization) setUserOrg(d.organization) })
+      .catch(() => {})
+  }, [])
 
   function updateField(event) {
     const { name, value } = event.target
@@ -58,6 +69,11 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
       return
     }
 
+    if (!form.description.trim()) {
+      setError('Enter a description for the threat observation.')
+      return
+    }
+
     let observedAt = null
 
     if (form.observed_at) {
@@ -76,9 +92,14 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
       observedAt = observationDate.toISOString()
     }
 
+    if (!userOrg) {
+      setError('Your organization has not loaded yet. Please wait.')
+      return
+    }
+
     const payload = {
       ...form,
-      organization_id: ORGANIZATION_ID,
+      organization_id: userOrg.id,
       title: form.title.trim(),
       indicator_value:
         form.indicator_type === 'none'
@@ -88,15 +109,23 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
       observed_at: observedAt,
     }
 
+    setSubmitting(true)
     try {
-      const result = await onSubmit(payload)
+      const token = getAccessToken()
+      const res = await fetch(`${API_BASE_URL}/api/cti/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Submission failed')
 
       setForm(initialForm)
-      setSuccess(
-        result?.message || 'Threat intelligence submitted successfully.',
-      )
+      setSuccess(data.message || 'Threat intelligence submitted successfully.')
     } catch (err) {
       setError(err.message || 'Unable to submit the record.')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -284,7 +313,7 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
           </label>
 
           <label className="cti-field cti-field-wide">
-            Description
+            Description *
             <textarea
               name="description"
               value={form.description}
@@ -292,6 +321,7 @@ function CTISubmissionForm({ onSubmit, submitting = false }) {
               placeholder="Describe the observation and its context..."
               rows={4}
               maxLength={3000}
+              required
             />
           </label>
         </div>

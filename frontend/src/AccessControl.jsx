@@ -61,10 +61,6 @@ export default function AccessControl() {
     loadData();
   }, []);
 
-  // This log will tell us if React has the data before rendering
-  console.log("Data loaded -> Organizations:", organizations);
-  console.log("Data loaded -> Records:", records);
-
   const handleEvaluate = async (e) => {
     e.preventDefault();
     if (!selectedOrg || !selectedRecord) return;
@@ -98,12 +94,22 @@ export default function AccessControl() {
         throw new Error(data.error || `Server error (HTTP ${res.status})`);
       }
 
-      const isGranted = data.decision === "allow" || data.decision === "granted" || data.allowed === true || data.decision === "ALLOW";
-      
+      const decisionVal = (data.decision || "").toUpperCase();
+      const isGranted = decisionVal === "ALLOW" || decisionVal === "GRANTED" || data.allowed === true;
+
       setDecision({
         granted: isGranted,
         reason: data.reason || (isGranted ? "Policy requirements met." : "Policy requirements not met."),
-        details: data.policy || data.details || {}
+        details: data.policy || data.details || {},
+        trust_score: data.trust_score,
+        trust_level: data.trust_level,
+        sensitivity: data.sensitivity,
+        policy_string: data.policy_string,
+        classification: data.classification,
+        attributes: data.attributes,
+        missing: data.missing,
+        risk_level: data.risk_level,
+        risk_score: data.risk_score,
       });
 
       const logRes = await fetch(`${API_BASE_URL}/api/audit-logs`, { headers: { Authorization: `Bearer ${token}` } });
@@ -172,17 +178,33 @@ export default function AccessControl() {
                 <h3>{decision.granted ? "ACCESS GRANTED" : "ACCESS DENIED"}</h3>
               </div>
               <p className="ac-reason">{decision.reason}</p>
-              
-              {Object.keys(decision.details).length > 0 && (
-                <div className="ac-details">
-                  <h4>Policy Context:</h4>
-                  <ul>
-                    {Object.entries(decision.details).map(([k, v]) => (
-                      <li key={k}><strong>{k}:</strong> {String(v)}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+
+              <div className="ac-details">
+                <h4>Access Decision Context:</h4>
+                <ul>
+                  {decision.sensitivity && (
+                    <li><strong>Sensitivity (FIPS 199):</strong> {decision.sensitivity}</li>
+                  )}
+                  {decision.policy_string && (
+                    <li><strong>Required Policy (LSSS):</strong> <code>{decision.policy_string}</code></li>
+                  )}
+                  {decision.trust_score !== undefined && (
+                    <li><strong>Trust:</strong> {decision.trust_score}/100 — {decision.trust_level}</li>
+                  )}
+                  {decision.attributes && decision.attributes.length > 0 && (
+                    <li><strong>Org Attributes:</strong> <code>{decision.attributes.join(", ")}</code></li>
+                  )}
+                  {decision.missing && decision.missing.length > 0 && (
+                    <li><strong>Missing:</strong> <code>{decision.missing.join(", ")}</code></li>
+                  )}
+                  {decision.risk_level && (
+                    <li><strong>Risk Level:</strong> {decision.risk_level}{decision.risk_score != null ? ` (score: ${decision.risk_score})` : ""}</li>
+                  )}
+                  {decision.classification && decision.classification.length > 0 && (
+                    <li><strong>Classification:</strong> {decision.classification.join("; ")}</li>
+                  )}
+                </ul>
+              </div>
             </div>
           )}
         </div>

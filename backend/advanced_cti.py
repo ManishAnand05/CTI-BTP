@@ -395,7 +395,7 @@ def list_advanced_cti():
             """
             SELECT id, category, indicator_type, indicator_value, title,
                    description, severity, confidence, sharing_sector,
-                   risk_score, risk_level, status, created_at
+                   stix_data, risk_score, risk_level, status, created_at
             FROM cti_records
             ORDER BY id DESC
             LIMIT ? OFFSET ?

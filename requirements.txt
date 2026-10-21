@@ -1,0 +1,8 @@
+flask>=3.0
+flask-cors>=4.0
+cryptography>=42.0
+pycryptodome>=3.20
+pypdf>=4.0
+stix2>=3.0
+pyjwt>=2.8
+werkzeug>=3.0

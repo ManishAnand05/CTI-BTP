@@ -1,17 +1,41 @@
+# Python
 .venv/
 venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment
 .env
 .env.*
 !.env.example
+
+# Node
 node_modules/
 frontend/dist/
-# Local CTI databases and backups
+
+# Database
 data/
-frontend-backup-*/
+
+# IDE / Editor
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
 *.log
 
-policy_engine_copy.txt
-# Visual Studio workspace files
-.vs/
+# Generated documents
+*.pptx
+*.docx
+
+# Claude Code
+.claude/

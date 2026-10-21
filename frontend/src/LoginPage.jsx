@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   AlertCircle,
   ArrowLeft,
+  Building2,
   CheckCircle2,
   Eye,
   EyeOff,
@@ -10,17 +11,15 @@ import {
   Info,
   Loader2,
   LockKeyhole,
+  Plus,
   Share2,
   ShieldCheck,
   UserPlus,
 } from 'lucide-react'
-import { api, ApiError } from './api'
+import { api, ApiError, API_BASE_URL, getAccessToken } from './api'
 import './LoginPage.css'
 
-// TODO: replace with an organization picker or server-side assignment.
-// The client should not decide which organization a new user joins.
-const DEFAULT_ORGANIZATION_ID = 1
-
+const SECTORS = ['Finance', 'Healthcare', 'Education', 'Technology', 'Government', 'Energy']
 const MIN_PASSWORD = 8
 const MAX_PASSWORD = 128
 
@@ -68,15 +67,27 @@ function LoginPage({ onLogin, onBack, notice = '' }) {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
+  const [organizations, setOrganizations] = useState([])
+  const [selectedOrgId, setSelectedOrgId] = useState('')
+  const [orgMode, setOrgMode] = useState('existing') // 'existing' | 'new'
+  const [newOrgName, setNewOrgName] = useState('')
+  const [newOrgSector, setNewOrgSector] = useState('Finance')
+
   const formRef = useRef(null)
   const mounted = useRef(true)
 
-  // Avoid setting state after this page unmounts (e.g. right after login).
   useEffect(() => {
     mounted.current = true
     return () => {
       mounted.current = false
     }
+  }, [])
+
+  useEffect(() => {
+    fetch(`${API_BASE_URL}/api/organizations/public`)
+      .then(r => r.ok ? r.json() : { organizations: [] })
+      .then(d => { if (mounted.current) setOrganizations(d.organizations || []) })
+      .catch(() => {})
   }, [])
 
   // Move focus to the first empty field whenever the form changes mode.
@@ -96,6 +107,10 @@ function LoginPage({ onLogin, onBack, notice = '' }) {
     setPassword('')
     setConfirmPassword('')
     setShowPassword(false)
+    setSelectedOrgId('')
+    setOrgMode('existing')
+    setNewOrgName('')
+    setNewOrgSector('Finance')
   }
 
   async function handleSubmit(event) {
@@ -123,15 +138,42 @@ function LoginPage({ onLogin, onBack, notice = '' }) {
         if (password !== confirmPassword) {
           throw new Error('Passwords do not match.')
         }
+        if (orgMode === 'existing' && !selectedOrgId) {
+          throw new Error('Select an organization to join.')
+        }
+        if (orgMode === 'new' && newOrgName.trim().length < 2) {
+          throw new Error('Organization name must be at least 2 characters.')
+        }
 
-        await api.register(
-          cleanName,
-          cleanEmail,
+        const regBody = {
+          name: cleanName,
+          email: cleanEmail,
           password,
-          DEFAULT_ORGANIZATION_ID,
-        )
+        }
+        if (orgMode === 'existing') {
+          regBody.organization_id = parseInt(selectedOrgId)
+        } else {
+          regBody.new_org_name = newOrgName.trim()
+          regBody.new_org_sector = newOrgSector
+        }
+
+        const regRes = await fetch(`${API_BASE_URL}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(regBody),
+        })
+        const regData = await regRes.json().catch(() => ({}))
+        if (!regRes.ok) {
+          throw new ApiError(regData.error || 'Registration failed', { status: regRes.status, data: regData })
+        }
 
         if (!mounted.current) return
+
+        // Refresh org list in case a new org was just created
+        fetch(`${API_BASE_URL}/api/organizations/public`)
+          .then(r => r.ok ? r.json() : { organizations: [] })
+          .then(d => { if (mounted.current) setOrganizations(d.organizations || []) })
+          .catch(() => {})
 
         setEmail(cleanEmail)
         setMessage('Account created. Sign in to continue.')
@@ -315,6 +357,61 @@ function LoginPage({ onLogin, onBack, notice = '' }) {
                   maxLength={MAX_PASSWORD}
                   required
                 />
+              </div>
+            )}
+
+            {registering && (
+              <div className="login-field">
+                <label>Organization</label>
+                <div className="login-org-tabs">
+                  <button
+                    type="button"
+                    className={`login-org-tab ${orgMode === 'existing' ? 'is-active' : ''}`}
+                    onClick={() => setOrgMode('existing')}
+                  >
+                    <Building2 size={14} /> Join existing
+                  </button>
+                  <button
+                    type="button"
+                    className={`login-org-tab ${orgMode === 'new' ? 'is-active' : ''}`}
+                    onClick={() => setOrgMode('new')}
+                  >
+                    <Plus size={14} /> Create new
+                  </button>
+                </div>
+
+                {orgMode === 'existing' ? (
+                  <select
+                    value={selectedOrgId}
+                    onChange={(e) => setSelectedOrgId(e.target.value)}
+                    className="login-org-select"
+                  >
+                    <option value="">Select your organization...</option>
+                    {organizations.map((org) => (
+                      <option key={org.id} value={org.id}>
+                        {org.name} ({org.sector})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="login-org-new">
+                    <input
+                      type="text"
+                      placeholder="Organization name"
+                      value={newOrgName}
+                      onChange={(e) => setNewOrgName(e.target.value)}
+                      maxLength={100}
+                    />
+                    <select
+                      value={newOrgSector}
+                      onChange={(e) => setNewOrgSector(e.target.value)}
+                    >
+                      {SECTORS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             )}
 

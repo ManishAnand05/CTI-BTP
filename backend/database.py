@@ -163,6 +163,103 @@ def initialize_database():
             ON users(organization_id)
         """)
 
+        # 7. Create the audit_logs table for security audit trail.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_name TEXT NOT NULL,
+                record_value TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                reason TEXT NOT NULL DEFAULT '',
+                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # 8. Create revoked_organizations table for persistent revocation.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS revoked_organizations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL UNIQUE,
+                revoked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                key_version INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp
+            ON audit_logs(timestamp)
+        """)
+
+        # 9. Create the encrypted_records table for stored ciphertexts.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS encrypted_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cti_record_id INTEGER NOT NULL,
+                ciphertext TEXT NOT NULL,
+                policy_display TEXT NOT NULL,
+                sensitivity TEXT,
+                classification TEXT,
+                encrypted_by_user_id INTEGER NOT NULL,
+                encrypted_by_org_id INTEGER NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (cti_record_id) REFERENCES cti_records(id),
+                FOREIGN KEY (encrypted_by_user_id) REFERENCES users(id),
+                FOREIGN KEY (encrypted_by_org_id) REFERENCES organizations(id)
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_encrypted_records_cti
+            ON encrypted_records(cti_record_id)
+        """)
+
+        # 10. PR-RABE ceremony event log.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS prrabe_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT '{}',
+                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_prrabe_events_type
+            ON prrabe_events(event_type)
+        """)
+
+        # 11. Incentive wallet — one row per organisation.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incentive_wallet (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL UNIQUE,
+                balance REAL NOT NULL DEFAULT 0,
+                lifetime_earned REAL NOT NULL DEFAULT 0,
+                lifetime_spent REAL NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id)
+            )
+        """)
+
+        # 12. Incentive transaction ledger.
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS incentive_transactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL,
+                amount REAL NOT NULL,
+                reason TEXT NOT NULL,
+                reference_id TEXT,
+                balance_after REAL NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id)
+            )
+        """)
+
+        connection.execute("""
+            CREATE INDEX IF NOT EXISTS idx_incentive_tx_org
+            ON incentive_transactions(organization_id)
+        """)
+
 
 # --------------------------------------------------
 # LEGACY CTI INDICATORS

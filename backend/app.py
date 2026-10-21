@@ -5,7 +5,11 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.crypto_engine import encrypt_payload, decrypt_payload, revoke_access, restore_access
+from backend.crypto_engine import encrypt_payload, decrypt_payload, revoke_access, restore_access, get_system_status
+from backend.trust_engine import compute_trust_score, get_trust_tier, generate_policy_string
+from backend.policy_engine import classify, build_policy, policy_to_string
+from backend.crypto.service import service as prrabe_service, get_events as get_prrabe_events
+from backend import incentive_engine
 import ipaddress
 import json
 import re
@@ -464,6 +468,16 @@ def list_organizations():
     try: return jsonify({"count": len(get_all_organizations()), "organizations": get_all_organizations()}), 200
     except Exception: return error_response("Organization retrieval failed", 500)
 
+@app.route("/api/organizations/public", methods=["GET"])
+def list_organizations_public():
+    """Return org id/name/sector for the registration form (no auth)."""
+    try:
+        orgs = get_all_organizations()
+        public = [{"id": o["id"], "name": o["name"], "sector": o["sector"]} for o in orgs]
+        return jsonify({"organizations": public}), 200
+    except Exception:
+        return error_response("Organization retrieval failed", 500)
+
 @app.route("/api/policies", methods=["GET"])
 @require_auth
 def list_policies():
@@ -494,7 +508,8 @@ def advanced_access_policy():
             with get_connection() as conn:
                 org = conn.execute("SELECT name FROM organizations WHERE id = ?", (data["organization_id"],)).fetchone()
                 rec = conn.execute("SELECT indicator_value FROM cti_records WHERE id = ?", (data["record_id"],)).fetchone()
-                is_granted = result.get("decision") in ["allow", "granted"] or result.get("allowed") == True
+                decision_val = (result.get("decision") or "").upper()
+                is_granted = decision_val in ["ALLOW", "GRANTED"] or result.get("allowed") is True
                 conn.execute("INSERT INTO audit_logs (organization_name, record_value, decision, reason, timestamp) VALUES (?, ?, ?, ?, ?)",
                     (org["name"] if org else "Unknown", rec["indicator_value"] if rec else "Unknown", "GRANTED" if is_granted else "DENIED", result.get("reason", ""), datetime.now().isoformat()))
                 conn.commit()
@@ -520,7 +535,19 @@ def auth_register():
     if register_limiter.retry_after(limiter_key): return too_many_requests(register_limiter.retry_after(limiter_key))
     register_limiter.record(limiter_key)
     try:
-        user = register_user(name=data.get("name"), email=clean_email(data.get("email")), password=data.get("password"), organization_id=data.get("organization_id"))
+        org_id = data.get("organization_id")
+        if not org_id and data.get("new_org_name") and data.get("new_org_sector"):
+            org_name = data["new_org_name"].strip()
+            org_sector = data["new_org_sector"].strip()
+            if len(org_name) < 2:
+                return error_response("Organization name must be at least 2 characters.")
+            try:
+                org_id = register_organization(org_name, org_sector, 50)
+            except sqlite3.IntegrityError:
+                return error_response("Organization name already exists. Select it from the list instead.", 409)
+        if not org_id:
+            return error_response("Select an organization or create a new one.")
+        user = register_user(name=data.get("name"), email=clean_email(data.get("email")), password=data.get("password"), organization_id=org_id)
         return jsonify({"message": "Registration successful", "user": public_user(user)}), 201
     except ValueError as error: return error_response(str(error), 400)
     except Exception: return error_response("Registration failed", 500)
@@ -541,19 +568,162 @@ def auth_login():
         return jsonify({"message": "Login successful", "access_token": create_access_token(user["id"]), "token_type": "Bearer", "user": public_user(user)}), 200
     except Exception: return error_response("Login failed", 500)
 
+@app.route("/api/auth/me", methods=["GET"])
+@require_auth
+def auth_me():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    org = None
+    try:
+        with get_connection() as conn:
+            row = conn.execute("SELECT id, name, sector, trust_score FROM organizations WHERE id = ?", (user["organization_id"],)).fetchone()
+            if row:
+                org = dict(row)
+    except Exception:
+        pass
+    return jsonify({"user": public_user(user), "organization": org}), 200
+
+@app.route("/api/crypto/status", methods=["GET"])
+@require_auth
+def crypto_status():
+    try:
+        return jsonify(get_system_status()), 200
+    except Exception as e:
+        return error_response(f"Crypto status failed: {str(e)}", 500)
+
+@app.route("/api/trust/compute/<int:org_id>", methods=["GET"])
+@require_auth
+def get_dynamic_trust(org_id):
+    result = compute_trust_score(org_id)
+    if result is None:
+        return error_response("Organization not found", 404)
+    return jsonify(result), 200
+
+@app.route("/api/trust/compute-all", methods=["GET"])
+@require_auth
+def compute_all_trust():
+    try:
+        orgs = get_all_organizations()
+        results = []
+        for org in orgs:
+            t = compute_trust_score(org["id"])
+            if t:
+                results.append(t)
+        return jsonify({"count": len(results), "trust_scores": results}), 200
+    except Exception as e:
+        return error_response(f"Trust computation failed: {str(e)}", 500)
+
 @app.route("/api/crypto/encrypt", methods=["POST", "OPTIONS"])
 def crypto_encrypt():
     if request.method == "OPTIONS": return jsonify({}), 200
-    if not current_user(): return error_response("Authentication required", 401)
+    user = current_user()
+    if not user: return error_response("Authentication required", 401)
     data = get_json_object()
-    return jsonify({"ciphertext": encrypt_payload(data.get("record"), data.get("policy", {}))}), 200
+    if not data:
+        return error_response("Send a valid JSON object")
+
+    record = data.get("record", {})
+    policy = data.get("policy", {})
+
+    if data.get("auto_policy"):
+        severity = record.get("severity", "low")
+        sector = policy.get("sector", "All")
+        risk_map = {"critical": "Critical", "high": "High", "medium": "Medium", "low": "Low"}
+        risk_level = risk_map.get(severity.lower(), "Low")
+        sensitivity, reasons = classify(risk_level)
+        struct_policy = build_policy(sensitivity, [sector] if sector != "All" else ["All"])
+        policy_string = policy_to_string(struct_policy)
+    else:
+        policy_string = None
+        sensitivity = None
+        reasons = None
+
+    ciphertext = encrypt_payload(record, policy_string if policy_string else policy)
+
+    cti_record_id = record.get("id")
+    if cti_record_id:
+        try:
+            with get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO encrypted_records
+                        (cti_record_id, ciphertext, policy_display, sensitivity, classification,
+                         encrypted_by_user_id, encrypted_by_org_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    cti_record_id, ciphertext,
+                    policy_string or " AND ".join(sorted(policy.values())) if isinstance(policy, dict) else str(policy),
+                    sensitivity,
+                    json.dumps(reasons) if reasons else None,
+                    user["id"], user["organization_id"],
+                ))
+        except Exception:
+            pass
+
+    result = {"ciphertext": ciphertext}
+    if policy_string:
+        result["generated_policy"] = policy_string
+        result["sensitivity"] = sensitivity
+        result["classification"] = reasons
+    return jsonify(result), 200
+
+@app.route("/api/crypto/encrypted", methods=["GET"])
+@require_auth
+def list_encrypted_records():
+    try:
+        with get_connection() as conn:
+            rows = conn.execute("""
+                SELECT er.id, er.cti_record_id, er.policy_display, er.sensitivity,
+                       er.classification, er.created_at,
+                       cr.title, cr.severity, cr.category, cr.sharing_sector,
+                       o.name AS encrypted_by_org
+                FROM encrypted_records er
+                JOIN cti_records cr ON er.cti_record_id = cr.id
+                JOIN organizations o ON er.encrypted_by_org_id = o.id
+                ORDER BY er.created_at DESC
+            """).fetchall()
+        return jsonify({"records": [dict(r) for r in rows]}), 200
+    except Exception as e:
+        return error_response(f"Failed to list encrypted records: {str(e)}", 500)
 
 @app.route("/api/crypto/decrypt", methods=["POST", "OPTIONS"])
 def crypto_decrypt():
     if request.method == "OPTIONS": return jsonify({}), 200
-    if not current_user(): return error_response("Authentication required", 401)
+    user = current_user()
+    if not user: return error_response("Authentication required", 401)
+
     data = get_json_object()
-    result = decrypt_payload(data.get("ciphertext"), data.get("user_attributes"))
+
+    ciphertext = data.get("ciphertext")
+    encrypted_record_id = data.get("encrypted_record_id")
+
+    if encrypted_record_id and not ciphertext:
+        try:
+            with get_connection() as conn:
+                row = conn.execute(
+                    "SELECT ciphertext FROM encrypted_records WHERE id = ?",
+                    (encrypted_record_id,),
+                ).fetchone()
+            if not row:
+                return error_response("Encrypted record not found", 404)
+            ciphertext = row["ciphertext"]
+        except Exception as e:
+            return error_response(f"Failed to fetch encrypted record: {str(e)}", 500)
+
+    if not ciphertext:
+        return error_response("No ciphertext provided", 400)
+
+    org_id = user["organization_id"]
+    with get_connection() as conn:
+        org_row = conn.execute(
+            "SELECT id, name, sector, trust_score FROM organizations WHERE id = ?",
+            (org_id,),
+        ).fetchone()
+    if not org_row:
+        return error_response("Organization not found", 404)
+
+    server_attributes = {"id": org_row["id"], "sector": org_row["sector"], "trust_score": org_row["trust_score"]}
+    result = decrypt_payload(ciphertext, server_attributes)
     return jsonify(result), 200 if result["success"] else 403
 
 @app.route("/api/crypto/revoke", methods=["POST", "OPTIONS"])
@@ -561,9 +731,277 @@ def crypto_revoke():
     if request.method == "OPTIONS": return jsonify({}), 200
     if not current_user(): return error_response("Authentication required", 401)
     data = get_json_object()
-    if data.get("action") == "restore": restore_access(data.get("organization_id"))
-    else: revoke_access(data.get("organization_id"))
-    return jsonify({"message": "Action successful"}), 200
+    org_id = data.get("organization_id")
+    policy_events = []
+    if data.get("action") == "restore":
+        restore_access(org_id)
+        action = "restore"
+        try:
+            from backend.policy_engine import update_trust
+            trust = compute_trust_score(org_id)
+            level = "High" if trust and trust["trust_score"] >= 80 else "Medium" if trust and trust["trust_score"] >= 50 else "Low"
+            policy_events = update_trust(org_id, level, trigger="access_restored")
+        except Exception:
+            pass
+    else:
+        revoke_access(org_id)
+        action = "revoke"
+        try:
+            from backend.policy_engine import update_trust
+            policy_events = update_trust(org_id, "Low", trigger="access_revoked")
+        except Exception:
+            pass
+    return jsonify({"message": "Action successful", "action": action, "policy_events": len(policy_events)}), 200
+
+# --------------------------------------------------
+# PR-RABE CEREMONY ROUTES
+# --------------------------------------------------
+
+@app.route("/api/prrabe/status", methods=["GET"])
+@require_auth
+def prrabe_status():
+    return jsonify(prrabe_service.get_status()), 200
+
+
+@app.route("/api/prrabe/init", methods=["POST"])
+@require_auth
+def prrabe_init():
+    data = get_json_object() or {}
+    num_slots = data.get("num_slots")
+    if num_slots is None:
+        num_slots = len(get_all_organizations())
+    if not isinstance(num_slots, int) or num_slots < 2:
+        return error_response("num_slots must be an integer >= 2")
+    try:
+        result = prrabe_service.init_system(num_slots)
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/keygen", methods=["POST"])
+@require_auth
+def prrabe_keygen():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object() or {}
+    org_id = data.get("organization_id", user["organization_id"])
+    if prrabe_service.aggregated and org_id != user["organization_id"]:
+        return error_response("You can only generate keys for your own organization after aggregation", 403)
+    org = get_organization(org_id)
+    if not org:
+        return error_response("Organization not found", 404)
+
+    trust = compute_trust_score(org_id)
+    trust_tier = get_trust_tier(trust["trust_score"]) if trust else "LOW"
+
+    try:
+        result = prrabe_service.register_org(
+            org_id=org_id,
+            org_name=org["name"],
+            sector=org["sector"],
+            trust_tier=trust_tier,
+        )
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/aggregate", methods=["POST"])
+@require_auth
+def prrabe_aggregate():
+    try:
+        result = prrabe_service.run_aggregate()
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/encrypt", methods=["POST"])
+@require_auth
+def prrabe_encrypt():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not data.get("record_id"):
+        return error_response("record_id is required")
+
+    record_id = data["record_id"]
+    with get_connection() as conn:
+        rec = conn.execute(
+            "SELECT * FROM cti_records WHERE id = ?", (record_id,)
+        ).fetchone()
+    if not rec:
+        return error_response("CTI record not found", 404)
+    rec = dict(rec)
+
+    policy_string = data.get("policy")
+    if not policy_string:
+        policy_string = generate_policy_string(rec["severity"], rec["sharing_sector"])
+
+    payload = {
+        "title": rec["title"],
+        "category": rec["category"],
+        "indicator_type": rec["indicator_type"],
+        "indicator_value": rec["indicator_value"],
+        "severity": rec["severity"],
+        "confidence": rec["confidence"],
+        "description": rec["description"],
+        "sharing_sector": rec["sharing_sector"],
+        "risk_score": rec["risk_score"],
+        "risk_level": rec["risk_level"],
+    }
+
+    try:
+        result = prrabe_service.encrypt_record(
+            record_id=record_id,
+            policy_string=policy_string,
+            payload_dict=payload,
+            encrypted_by_org_id=user["organization_id"],
+        )
+        try:
+            with get_connection() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO encrypted_records
+                        (cti_record_id, ciphertext, policy_display, sensitivity, classification,
+                         encrypted_by_user_id, encrypted_by_org_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    record_id, "prrabe",
+                    policy_string, None, None,
+                    user["id"], user["organization_id"],
+                ))
+        except Exception:
+            pass
+        incentive_engine.reward_share(user["organization_id"], record_id)
+        if rec["confidence"] in ("high", "confirmed"):
+            incentive_engine.reward_high_confidence(user["organization_id"], record_id)
+        return jsonify(result), 200
+    except (RuntimeError, ValueError) as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/decrypt", methods=["POST"])
+@require_auth
+def prrabe_decrypt():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not data.get("record_id"):
+        return error_response("record_id is required")
+
+    org_id = user["organization_id"]
+    try:
+        result = prrabe_service.decrypt_record(org_id, data["record_id"])
+        status_code = 200 if result.get("success") else 403
+        return jsonify(result), status_code
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/revoke", methods=["POST"])
+@require_auth
+def prrabe_revoke():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data:
+        return error_response("Send a valid JSON object")
+    org_id = data.get("organization_id", user["organization_id"])
+    if org_id != user["organization_id"]:
+        return error_response("You can only revoke attributes for your own organization", 403)
+    attribute = data.get("attribute")
+    if not attribute:
+        return error_response("attribute is required (e.g. TRUST:HIGH)")
+
+    try:
+        result = prrabe_service.revoke_attribute(
+            org_id, attribute,
+        )
+        incentive_engine.penalize_revocation(org_id)
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/events", methods=["GET"])
+@require_auth
+def prrabe_events():
+    limit = request.args.get("limit", 50, type=int)
+    return jsonify({"events": get_prrabe_events(limit)}), 200
+
+
+@app.route("/api/prrabe/demo-decrypt", methods=["POST"])
+@require_auth
+def prrabe_demo_decrypt():
+    """Demo-only: decrypt a record as a specified org to demonstrate revocation effects."""
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data or not data.get("record_id") or not data.get("organization_id"):
+        return error_response("record_id and organization_id are required")
+    org_id = data["organization_id"]
+    org = get_organization(org_id)
+    if not org:
+        return error_response("Organization not found", 404)
+    try:
+        result = prrabe_service.decrypt_record(org_id, data["record_id"])
+        result["demo_org_name"] = org["name"]
+        return jsonify(result), 200 if result.get("success") else 403
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+@app.route("/api/prrabe/demo-revoke", methods=["POST"])
+@require_auth
+def prrabe_demo_revoke():
+    """Demo-only: revoke an attribute for any org to demonstrate AGK rotation."""
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    data = get_json_object()
+    if not data:
+        return error_response("Send a valid JSON object")
+    org_id = data.get("organization_id")
+    attribute = data.get("attribute")
+    if not org_id or not attribute:
+        return error_response("organization_id and attribute are required")
+    org = get_organization(org_id)
+    if not org:
+        return error_response("Organization not found", 404)
+    try:
+        result = prrabe_service.revoke_attribute(org_id, attribute)
+        return jsonify(result), 200
+    except RuntimeError as e:
+        return error_response(str(e), 500)
+
+
+# --------------------------------------------------
+# INCENTIVE ROUTES
+# --------------------------------------------------
+
+@app.route("/api/incentive/wallet", methods=["GET"])
+@require_auth
+def incentive_wallet():
+    user = current_user()
+    if not user:
+        return error_response("Authentication required", 401)
+    org_id = request.args.get("org_id", type=int) or user["organization_id"]
+    wallet = incentive_engine.get_wallet(org_id)
+    transactions = incentive_engine.get_transactions(org_id)
+    return jsonify({"wallet": wallet, "transactions": transactions}), 200
+
+
+@app.route("/api/incentive/leaderboard", methods=["GET"])
+@require_auth
+def incentive_leaderboard():
+    return jsonify({"leaderboard": incentive_engine.get_leaderboard()}), 200
+
 
 if __name__ == "__main__":
     app.run(host=os.environ.get("HOST", "127.0.0.1"), port=int(os.environ.get("PORT", "5000")), debug=os.environ.get("FLASK_DEBUG", "1") == "1")
